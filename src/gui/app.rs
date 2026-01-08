@@ -1,7 +1,4 @@
-//! Main GUI application struct and eframe::App implementation.
-//!
-//! This module contains the DataXApp struct which holds all application state
-//! for the GUI version and implements the eframe::App trait for rendering.
+//! Main GUI application - Professional Data-X disk analyzer
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -9,221 +6,180 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::Instant;
 
-use eframe::egui;
+use eframe::egui::{self, Color32, Pos2, Rect, RichText, Rounding, Stroke, Vec2};
 use indextree::NodeId;
 
 use crate::scanner::{get_disk_space, DiskSpaceInfo, ScanOptions, ScanProgress, Scanner};
-use crate::tree::FileTree;
+use crate::tree::{FileNode, FileTree};
 
-/// View mode for the main display area in GUI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum GuiViewMode {
-    /// Tree view only (classic explorer style)
+// ============================================================================
+// Color Scheme - Dark theme inspired by modern disk analyzers
+// ============================================================================
+
+struct Theme {
+    bg_dark: Color32,
+    bg_medium: Color32,
+    bg_light: Color32,
+    text_primary: Color32,
+    text_secondary: Color32,
+    accent: Color32,
+    // File type colors
+    dir_color: Color32,
+    audio_color: Color32,
+    video_color: Color32,
+    image_color: Color32,
+    doc_color: Color32,
+    code_color: Color32,
+    archive_color: Color32,
+    other_color: Color32,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            bg_dark: Color32::from_rgb(18, 18, 24),
+            bg_medium: Color32::from_rgb(28, 28, 36),
+            bg_light: Color32::from_rgb(38, 38, 48),
+            text_primary: Color32::from_rgb(240, 240, 245),
+            text_secondary: Color32::from_rgb(140, 140, 160),
+            accent: Color32::from_rgb(100, 140, 255),
+            dir_color: Color32::from_rgb(90, 130, 180),
+            audio_color: Color32::from_rgb(180, 100, 200),
+            video_color: Color32::from_rgb(220, 80, 80),
+            image_color: Color32::from_rgb(80, 180, 100),
+            doc_color: Color32::from_rgb(80, 140, 220),
+            code_color: Color32::from_rgb(220, 180, 60),
+            archive_color: Color32::from_rgb(220, 140, 60),
+            other_color: Color32::from_rgb(120, 120, 140),
+        }
+    }
+}
+
+// ============================================================================
+// Main Application State
+// ============================================================================
+
+pub struct DataXApp {
+    // Core data
+    tree: Option<FileTree>,
+    root_path: PathBuf,
+
+    // Selection
+    selected_node: Option<NodeId>,
+    expanded_nodes: HashSet<NodeId>,
+    hovered_node: Option<NodeId>,
+
+    // View state
+    view_mode: ViewMode,
+    show_hidden: bool,
+    search_query: String,
+
+    // Disk info
+    disk_info: Option<DiskSpaceInfo>,
+
+    // Scan state
+    scan_state: ScanState,
+    scan_progress: ScanProgressInfo,
+    progress_receiver: Option<Receiver<ScanProgress>>,
+
+    // Treemap cache
+    treemap_rects: Vec<TreemapRect>,
+    treemap_root: Option<NodeId>,
+
+    // Theme
+    theme: Theme,
+
+    // Auto-start flag
+    scan_started: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum ViewMode {
     #[default]
-    Tree,
-    /// Treemap visualization only
     Treemap,
-    /// Split view: tree on left, treemap on right
+    Tree,
     Split,
 }
 
-impl GuiViewMode {
-    /// Cycle to the next view mode.
-    pub fn next(self) -> Self {
-        match self {
-            GuiViewMode::Tree => GuiViewMode::Treemap,
-            GuiViewMode::Treemap => GuiViewMode::Split,
-            GuiViewMode::Split => GuiViewMode::Tree,
-        }
-    }
-
-    /// Get display name for UI.
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            GuiViewMode::Tree => "Tree",
-            GuiViewMode::Treemap => "Treemap",
-            GuiViewMode::Split => "Split",
-        }
-    }
-}
-
-/// Scan state for tracking background scan progress.
 #[derive(Clone, PartialEq)]
 pub enum ScanState {
-    /// No scan in progress.
     Idle,
-    /// Scan is running.
     Scanning,
-    /// Scan completed successfully.
     Complete,
-    /// Scan encountered an error.
     Error(String),
 }
 
-/// Progress information during scanning.
 #[derive(Clone, Default)]
 pub struct ScanProgressInfo {
-    /// Current phase of the scan.
-    pub phase: ScanPhase,
-    /// Number of files discovered so far.
     pub files_found: u64,
-    /// Current path being scanned.
     pub current_path: String,
-    /// Total files (after scan complete).
     pub total_files: u64,
-    /// Total size in bytes.
     pub total_size: u64,
-    /// Estimated total files (during scan).
-    pub estimated_total: u64,
-    /// Bytes processed so far.
     pub bytes_processed: u64,
-    /// When the scan started.
     pub start_time: Option<Instant>,
-    /// Items processed per second.
-    pub items_per_second: f64,
 }
 
-/// Scan phase for progress display.
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-pub enum ScanPhase {
-    #[default]
-    Idle,
-    Counting,
-    Analyzing,
-    Building,
-    Complete,
+#[derive(Clone)]
+struct TreemapRect {
+    node_id: NodeId,
+    rect: Rect,
+    name: String,
+    size: u64,
+    is_dir: bool,
+    color: Color32,
+    depth: usize,
 }
 
-impl ScanProgressInfo {
-    /// Get progress percentage (0.0 to 1.0).
-    pub fn progress_percent(&self) -> f32 {
-        match self.phase {
-            ScanPhase::Idle => 0.0,
-            ScanPhase::Counting => 0.15,
-            ScanPhase::Analyzing => {
-                if self.estimated_total == 0 {
-                    0.5
-                } else {
-                    (self.files_found as f32 / self.estimated_total as f32).min(1.0)
-                }
-            }
-            ScanPhase::Building => 0.98,
-            ScanPhase::Complete => 1.0,
-        }
-    }
+impl DataXApp {
+    pub fn new(cc: &eframe::CreationContext<'_>, root_path: PathBuf) -> Self {
+        // Configure dark theme
+        let mut visuals = egui::Visuals::dark();
+        visuals.window_fill = Color32::from_rgb(18, 18, 24);
+        visuals.panel_fill = Color32::from_rgb(22, 22, 30);
+        visuals.faint_bg_color = Color32::from_rgb(28, 28, 36);
+        visuals.extreme_bg_color = Color32::from_rgb(12, 12, 16);
+        visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(32, 32, 42);
+        visuals.widgets.inactive.bg_fill = Color32::from_rgb(38, 38, 50);
+        visuals.widgets.hovered.bg_fill = Color32::from_rgb(50, 50, 65);
+        visuals.widgets.active.bg_fill = Color32::from_rgb(60, 60, 80);
+        visuals.selection.bg_fill = Color32::from_rgb(60, 100, 180);
+        cc.egui_ctx.set_visuals(visuals);
 
-    /// Format elapsed time.
-    pub fn elapsed_string(&self) -> String {
-        match self.start_time {
-            Some(start) => {
-                let elapsed = start.elapsed().as_secs();
-                if elapsed < 60 {
-                    format!("{}s", elapsed)
-                } else {
-                    format!("{}m {}s", elapsed / 60, elapsed % 60)
-                }
-            }
-            None => "0s".to_string(),
-        }
-    }
-}
+        // Set default fonts
+        let mut style = (*cc.egui_ctx.style()).clone();
+        style.spacing.item_spacing = Vec2::new(8.0, 6.0);
+        style.spacing.button_padding = Vec2::new(8.0, 4.0);
+        cc.egui_ctx.set_style(style);
 
-/// Main application state for the GUI.
-pub struct DataXApp {
-    // Core data
-    /// The file tree structure (None until scan completes).
-    pub tree: Option<FileTree>,
-    /// Root path being analyzed.
-    pub root_path: PathBuf,
-
-    // Selection and navigation
-    /// Currently selected node in the tree.
-    pub selected_node: Option<NodeId>,
-    /// Set of expanded nodes in the tree view.
-    pub expanded_nodes: HashSet<NodeId>,
-
-    // View state
-    /// Current view mode (Tree/Treemap/Split).
-    pub view_mode: GuiViewMode,
-    /// Whether to show the statistics panel.
-    pub show_stats: bool,
-    /// Current search/filter query.
-    pub search_query: String,
-    /// Whether to show hidden files.
-    pub show_hidden: bool,
-
-    // Disk info
-    /// Disk space information for the scanned volume.
-    pub disk_info: Option<DiskSpaceInfo>,
-
-    // Scan state
-    /// Current scan state.
-    pub scan_state: ScanState,
-    /// Scan progress information.
-    pub scan_progress: ScanProgressInfo,
-    /// Channel receiver for scan progress updates.
-    progress_receiver: Option<Receiver<ScanProgress>>,
-
-    // UI state
-    /// Whether the left panel (tree) is visible.
-    pub show_left_panel: bool,
-    /// Whether the right panel (details/stats) is visible.
-    pub show_right_panel: bool,
-    /// Width of the left panel in pixels.
-    pub left_panel_width: f32,
-    /// Width of the right panel in pixels.
-    pub right_panel_width: f32,
-}
-
-impl Default for DataXApp {
-    fn default() -> Self {
         Self {
             tree: None,
-            root_path: PathBuf::from("."),
+            root_path: root_path.clone(),
             selected_node: None,
             expanded_nodes: HashSet::new(),
-            view_mode: GuiViewMode::default(),
-            show_stats: false,
-            search_query: String::new(),
+            hovered_node: None,
+            view_mode: ViewMode::Treemap,
             show_hidden: false,
+            search_query: String::new(),
             disk_info: None,
             scan_state: ScanState::Idle,
             scan_progress: ScanProgressInfo::default(),
             progress_receiver: None,
-            show_left_panel: true,
-            show_right_panel: true,
-            left_panel_width: 300.0,
-            right_panel_width: 250.0,
-        }
-    }
-}
-
-impl DataXApp {
-    /// Create a new DataXApp with the given root path.
-    /// This is the primary constructor that accepts the eframe creation context.
-    pub fn new(cc: &eframe::CreationContext<'_>, root_path: PathBuf) -> Self {
-        // Configure default fonts and style
-        let mut style = (*cc.egui_ctx.style()).clone();
-        style.spacing.item_spacing = egui::vec2(8.0, 4.0);
-        cc.egui_ctx.set_style(style);
-
-        Self {
-            root_path,
-            ..Default::default()
+            treemap_rects: Vec::new(),
+            treemap_root: None,
+            theme: Theme::default(),
+            scan_started: false,
         }
     }
 
-    /// Create a new DataXApp with just a root path (for testing or when no cc is available).
-    #[allow(dead_code)]
-    pub fn new_simple(root_path: PathBuf) -> Self {
-        Self {
-            root_path,
-            ..Default::default()
-        }
-    }
+    fn start_scan(&mut self) {
+        let options = ScanOptions {
+            root_path: self.root_path.clone(),
+            max_depth: None,
+            exclude_patterns: vec![],
+            cross_mount: true,
+            apparent_size: false,
+        };
 
-    /// Start scanning in a background thread.
-    pub fn start_scan(&mut self, options: ScanOptions) {
         self.scan_state = ScanState::Scanning;
         self.scan_progress = ScanProgressInfo::default();
         self.scan_progress.start_time = Some(Instant::now());
@@ -231,20 +187,14 @@ impl DataXApp {
         let (tx, rx) = mpsc::sync_channel(1000);
         self.progress_receiver = Some(rx);
 
-        let root_path = options.root_path.clone();
-
         thread::spawn(move || {
             let scanner = Scanner::new(options, tx);
             let _result = scanner.scan();
         });
-
-        self.root_path = root_path;
     }
 
-    /// Check for progress updates from the scanner (non-blocking).
-    pub fn poll_scan_progress(&mut self) {
-        let mut messages: Vec<ScanProgress> = Vec::new();
-        let mut receiver_disconnected = false;
+    fn poll_progress(&mut self) {
+        let mut messages = Vec::new();
 
         if let Some(ref receiver) = self.progress_receiver {
             loop {
@@ -252,213 +202,591 @@ impl DataXApp {
                     Ok(progress) => messages.push(progress),
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
-                        receiver_disconnected = true;
+                        self.progress_receiver = None;
                         break;
                     }
                 }
             }
         }
 
-        // Process messages
         for progress in messages {
             match progress {
                 ScanProgress::Started => {
                     self.scan_state = ScanState::Scanning;
-                    self.scan_progress.phase = ScanPhase::Analyzing;
-                    if self.scan_progress.start_time.is_none() {
-                        self.scan_progress.start_time = Some(Instant::now());
-                    }
                 }
-                ScanProgress::Counting { items_counted, current_path } => {
-                    self.scan_progress.phase = ScanPhase::Counting;
-                    self.scan_progress.files_found = items_counted;
-                    self.scan_progress.current_path = current_path.to_string_lossy().to_string();
-                }
-                ScanProgress::CountingComplete { total_items } => {
-                    self.scan_progress.estimated_total = total_items;
-                }
-                ScanProgress::Scanning {
-                    path,
-                    files_found,
-                    estimated_total,
-                    bytes_processed,
-                } => {
-                    self.scan_progress.phase = ScanPhase::Analyzing;
+                ScanProgress::Scanning { path, files_found, bytes_processed, .. } => {
                     self.scan_progress.files_found = files_found;
-                    self.scan_progress.estimated_total = estimated_total;
                     self.scan_progress.bytes_processed = bytes_processed;
-                    self.scan_progress.current_path = path.to_string_lossy().to_string();
-
-                    // Calculate speed
-                    if let Some(start) = self.scan_progress.start_time {
-                        let elapsed = start.elapsed().as_secs_f64();
-                        if elapsed > 0.3 {
-                            self.scan_progress.items_per_second = files_found as f64 / elapsed;
-                        }
-                    }
+                    self.scan_progress.current_path = path.to_string_lossy().into_owned();
                 }
-                ScanProgress::NodeDiscovered { node: _, parent_path: _ } => {
-                    // Handle streaming node discovery (for future incremental display)
-                }
-                ScanProgress::Building { .. } => {
-                    self.scan_progress.phase = ScanPhase::Building;
-                }
-                ScanProgress::Completed {
-                    total_files,
-                    total_size,
-                    tree,
-                } => {
-                    self.scan_progress.phase = ScanPhase::Complete;
+                ScanProgress::Completed { total_files, total_size, tree } => {
                     self.scan_progress.total_files = total_files;
                     self.scan_progress.total_size = total_size;
                     self.tree = Some(tree);
                     self.scan_state = ScanState::Complete;
                     self.progress_receiver = None;
-
-                    // Get disk space info
                     self.disk_info = get_disk_space(&self.root_path);
 
-                    // Expand root node
+                    // Expand and select root
                     if let Some(ref tree) = self.tree {
                         if let Some(root) = tree.root {
                             self.expanded_nodes.insert(root);
                             self.selected_node = Some(root);
+                            self.treemap_root = Some(root);
+                            self.rebuild_treemap();
                         }
                     }
                 }
-                ScanProgress::Error { path: _, error: _ } => {
-                    // Silently ignore individual file errors
-                }
-            }
-        }
-
-        if receiver_disconnected {
-            self.progress_receiver = None;
-            if self.scan_state == ScanState::Scanning {
-                self.scan_state = ScanState::Error("Scanner disconnected".to_string());
+                _ => {}
             }
         }
     }
 
-    /// Toggle expansion of a node.
-    pub fn toggle_node(&mut self, node_id: NodeId) {
-        if self.expanded_nodes.contains(&node_id) {
-            self.expanded_nodes.remove(&node_id);
-        } else {
-            self.expanded_nodes.insert(node_id);
+    fn get_file_color(&self, node: &FileNode) -> Color32 {
+        if node.is_dir {
+            return self.theme.dir_color;
+        }
+
+        match node.extension.as_deref() {
+            Some("mp3") | Some("wav") | Some("flac") | Some("m4a") | Some("aac") | Some("ogg") => self.theme.audio_color,
+            Some("mp4") | Some("mkv") | Some("avi") | Some("mov") | Some("wmv") | Some("webm") => self.theme.video_color,
+            Some("jpg") | Some("jpeg") | Some("png") | Some("gif") | Some("bmp") | Some("svg") | Some("webp") => self.theme.image_color,
+            Some("pdf") | Some("doc") | Some("docx") | Some("txt") | Some("rtf") | Some("odt") => self.theme.doc_color,
+            Some("rs") | Some("py") | Some("js") | Some("ts") | Some("go") | Some("c") | Some("cpp") | Some("h") | Some("java") => self.theme.code_color,
+            Some("zip") | Some("tar") | Some("gz") | Some("rar") | Some("7z") | Some("bz2") | Some("xz") => self.theme.archive_color,
+            _ => self.theme.other_color,
         }
     }
 
-    /// Select a node.
-    pub fn select_node(&mut self, node_id: NodeId) {
-        self.selected_node = Some(node_id);
-    }
-
-    /// Get the currently selected node's data.
-    pub fn get_selected_node_data(&self) -> Option<&crate::tree::FileNode> {
-        self.selected_node
-            .and_then(|id| self.tree.as_ref()?.get_node(id))
-    }
-
-    /// Format a size in bytes to human-readable string.
-    pub fn format_size(bytes: u64) -> String {
+    fn format_size(bytes: u64) -> String {
         const KB: u64 = 1024;
         const MB: u64 = KB * 1024;
         const GB: u64 = MB * 1024;
         const TB: u64 = GB * 1024;
 
         if bytes >= TB {
-            format!("{:.2} TB", bytes as f64 / TB as f64)
+            format!("{:.1} TB", bytes as f64 / TB as f64)
         } else if bytes >= GB {
-            format!("{:.2} GB", bytes as f64 / GB as f64)
+            format!("{:.1} GB", bytes as f64 / GB as f64)
         } else if bytes >= MB {
-            format!("{:.2} MB", bytes as f64 / MB as f64)
+            format!("{:.1} MB", bytes as f64 / MB as f64)
         } else if bytes >= KB {
-            format!("{:.2} KB", bytes as f64 / KB as f64)
+            format!("{:.1} KB", bytes as f64 / KB as f64)
         } else {
             format!("{} B", bytes)
+        }
+    }
+
+    // ========================================================================
+    // Treemap rendering
+    // ========================================================================
+
+    fn rebuild_treemap(&mut self) {
+        self.treemap_rects.clear();
+
+        let Some(ref tree) = self.tree else { return };
+        let Some(root_id) = self.treemap_root.or(tree.root) else { return };
+
+        // Build will happen during render when we know the rect size
+    }
+
+    fn build_treemap_rects(&mut self, rect: Rect) {
+        self.treemap_rects.clear();
+
+        let Some(ref tree) = self.tree else { return };
+        let root_id = self.treemap_root.unwrap_or_else(|| tree.root.unwrap());
+
+        let children: Vec<NodeId> = tree.get_children(root_id);
+        if children.is_empty() {
+            // Single file root
+            if let Some(node) = tree.get_node(root_id) {
+                self.treemap_rects.push(TreemapRect {
+                    node_id: root_id,
+                    rect,
+                    name: node.name.clone(),
+                    size: node.size,
+                    is_dir: node.is_dir,
+                    color: self.get_file_color(node),
+                    depth: 0,
+                });
+            }
+            return;
+        }
+
+        // Collect children with sizes
+        let mut items: Vec<(NodeId, u64, String, bool, Color32)> = children
+            .iter()
+            .filter_map(|&id| {
+                let node = tree.get_node(id)?;
+                if !self.show_hidden && node.is_hidden {
+                    return None;
+                }
+                Some((id, node.size, node.name.clone(), node.is_dir, self.get_file_color(node)))
+            })
+            .collect();
+
+        // Sort by size descending
+        items.sort_by(|a, b| b.1.cmp(&a.1));
+
+        // Squarify layout
+        self.squarify(&items, rect, 0);
+    }
+
+    fn squarify(&mut self, items: &[(NodeId, u64, String, bool, Color32)], rect: Rect, depth: usize) {
+        if items.is_empty() || rect.width() < 2.0 || rect.height() < 2.0 {
+            return;
+        }
+
+        let total_size: u64 = items.iter().map(|i| i.1).sum();
+        if total_size == 0 {
+            return;
+        }
+
+        let mut remaining_items = items.to_vec();
+        let mut remaining_rect = rect;
+
+        while !remaining_items.is_empty() {
+            let is_horizontal = remaining_rect.width() >= remaining_rect.height();
+
+            // Find best row
+            let (row_items, row_size) = self.find_best_row(&remaining_items, &remaining_rect, is_horizontal);
+
+            if row_items == 0 {
+                break;
+            }
+
+            // Layout the row
+            let remaining_size: u64 = remaining_items.iter().map(|i| i.1).sum();
+            let row_fraction = if remaining_size > 0 { row_size as f64 / remaining_size as f64 } else { 1.0 };
+
+            let (row_rect, new_remaining) = if is_horizontal {
+                let row_width = (remaining_rect.width() as f64 * row_fraction) as f32;
+                (
+                    Rect::from_min_size(remaining_rect.min, Vec2::new(row_width, remaining_rect.height())),
+                    Rect::from_min_size(
+                        Pos2::new(remaining_rect.min.x + row_width, remaining_rect.min.y),
+                        Vec2::new(remaining_rect.width() - row_width, remaining_rect.height()),
+                    ),
+                )
+            } else {
+                let row_height = (remaining_rect.height() as f64 * row_fraction) as f32;
+                (
+                    Rect::from_min_size(remaining_rect.min, Vec2::new(remaining_rect.width(), row_height)),
+                    Rect::from_min_size(
+                        Pos2::new(remaining_rect.min.x, remaining_rect.min.y + row_height),
+                        Vec2::new(remaining_rect.width(), remaining_rect.height() - row_height),
+                    ),
+                )
+            };
+
+            // Layout items in row
+            let mut pos = row_rect.min;
+            for i in 0..row_items {
+                let item = &remaining_items[i];
+                let item_fraction = if row_size > 0 { item.1 as f64 / row_size as f64 } else { 0.0 };
+
+                let item_rect = if is_horizontal {
+                    let h = (row_rect.height() as f64 * item_fraction) as f32;
+                    let r = Rect::from_min_size(pos, Vec2::new(row_rect.width(), h));
+                    pos.y += h;
+                    r
+                } else {
+                    let w = (row_rect.width() as f64 * item_fraction) as f32;
+                    let r = Rect::from_min_size(pos, Vec2::new(w, row_rect.height()));
+                    pos.x += w;
+                    r
+                };
+
+                // Add padding
+                let padded = item_rect.shrink(1.0);
+                if padded.width() > 0.0 && padded.height() > 0.0 {
+                    self.treemap_rects.push(TreemapRect {
+                        node_id: item.0,
+                        rect: padded,
+                        name: item.2.clone(),
+                        size: item.1,
+                        is_dir: item.3,
+                        color: item.4,
+                        depth,
+                    });
+                }
+            }
+
+            remaining_items = remaining_items[row_items..].to_vec();
+            remaining_rect = new_remaining;
+        }
+    }
+
+    fn find_best_row(&self, items: &[(NodeId, u64, String, bool, Color32)], rect: &Rect, horizontal: bool) -> (usize, u64) {
+        if items.is_empty() {
+            return (0, 0);
+        }
+
+        let total_size: u64 = items.iter().map(|i| i.1).sum();
+        if total_size == 0 {
+            return (items.len(), 0);
+        }
+
+        let rect_area = (rect.width() * rect.height()) as f64;
+        let short_side = if horizontal { rect.height() } else { rect.width() } as f64;
+
+        let mut best_count = 1;
+        let mut best_ratio = f64::MAX;
+        let mut row_size: u64 = 0;
+
+        for i in 0..items.len() {
+            row_size += items[i].1;
+
+            let row_area = rect_area * (row_size as f64 / total_size as f64);
+            let row_short = row_area / short_side;
+
+            // Calculate worst aspect ratio in this row
+            let mut worst_ratio = 0.0f64;
+            let mut item_size_sum: u64 = 0;
+
+            for j in 0..=i {
+                item_size_sum += items[j].1;
+                let item_area = rect_area * (items[j].1 as f64 / total_size as f64);
+                let item_long = item_area / row_short;
+                let ratio = (item_long / row_short).max(row_short / item_long);
+                worst_ratio = worst_ratio.max(ratio);
+            }
+
+            if worst_ratio < best_ratio {
+                best_ratio = worst_ratio;
+                best_count = i + 1;
+            } else if i > 0 {
+                // Ratio getting worse, stop here
+                break;
+            }
+        }
+
+        let final_size: u64 = items[..best_count].iter().map(|i| i.1).sum();
+        (best_count, final_size)
+    }
+
+    fn render_treemap(&mut self, ui: &mut egui::Ui) {
+        let rect = ui.available_rect_before_wrap();
+
+        // Rebuild treemap if needed
+        if self.treemap_rects.is_empty() || self.tree.is_some() {
+            self.build_treemap_rects(rect.shrink(4.0));
+        }
+
+        let painter = ui.painter();
+
+        // Background
+        painter.rect_filled(rect, Rounding::ZERO, self.theme.bg_dark);
+
+        // Draw rects
+        let mouse_pos = ui.input(|i| i.pointer.hover_pos());
+        let mut new_hovered = None;
+        let mut clicked_node = None;
+        let mut double_clicked = false;
+
+        for tr in &self.treemap_rects {
+            let is_hovered = mouse_pos.map(|p| tr.rect.contains(p)).unwrap_or(false);
+            let is_selected = self.selected_node == Some(tr.node_id);
+
+            if is_hovered {
+                new_hovered = Some(tr.node_id);
+            }
+
+            // Darken color for depth effect
+            let base_color = tr.color;
+            let color = if is_selected {
+                Color32::from_rgb(
+                    (base_color.r() as u16 + 60).min(255) as u8,
+                    (base_color.g() as u16 + 60).min(255) as u8,
+                    (base_color.b() as u16 + 60).min(255) as u8,
+                )
+            } else if is_hovered {
+                Color32::from_rgb(
+                    (base_color.r() as u16 + 30).min(255) as u8,
+                    (base_color.g() as u16 + 30).min(255) as u8,
+                    (base_color.b() as u16 + 30).min(255) as u8,
+                )
+            } else {
+                base_color
+            };
+
+            // Draw rect
+            painter.rect_filled(tr.rect, Rounding::same(2.0), color);
+
+            // Border
+            let stroke_color = if is_selected {
+                Color32::WHITE
+            } else {
+                Color32::from_rgba_unmultiplied(0, 0, 0, 100)
+            };
+            painter.rect_stroke(tr.rect, Rounding::same(2.0), Stroke::new(if is_selected { 2.0 } else { 1.0 }, stroke_color));
+
+            // Label if rect is big enough
+            if tr.rect.width() > 40.0 && tr.rect.height() > 20.0 {
+                let text = if tr.rect.width() > 100.0 {
+                    format!("{}\n{}", truncate(&tr.name, 15), Self::format_size(tr.size))
+                } else {
+                    truncate(&tr.name, 8)
+                };
+
+                painter.text(
+                    tr.rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    text,
+                    egui::FontId::proportional(11.0),
+                    Color32::WHITE,
+                );
+            }
+        }
+
+        self.hovered_node = new_hovered;
+
+        // Handle clicks
+        let response = ui.allocate_rect(rect, egui::Sense::click());
+        if response.clicked() {
+            if let Some(pos) = mouse_pos {
+                for tr in &self.treemap_rects {
+                    if tr.rect.contains(pos) {
+                        clicked_node = Some(tr.node_id);
+                        break;
+                    }
+                }
+            }
+        }
+        if response.double_clicked() {
+            double_clicked = true;
+        }
+
+        if let Some(node_id) = clicked_node {
+            self.selected_node = Some(node_id);
+
+            if double_clicked {
+                // Drill down into directory
+                if let Some(ref tree) = self.tree {
+                    if let Some(node) = tree.get_node(node_id) {
+                        if node.is_dir && !tree.get_children(node_id).is_empty() {
+                            self.treemap_root = Some(node_id);
+                            self.treemap_rects.clear();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Show tooltip for hovered item
+        if let Some(hovered_id) = self.hovered_node {
+            if let Some(ref tree) = self.tree {
+                if let Some(node) = tree.get_node(hovered_id) {
+                    egui::show_tooltip(ui.ctx(), ui.layer_id(), egui::Id::new("treemap_tooltip"), |ui| {
+                        ui.label(RichText::new(&node.name).strong());
+                        ui.label(format!("Size: {}", Self::format_size(node.size)));
+                        ui.label(format!("Path: {}", node.path.display()));
+                        if node.is_dir {
+                            ui.label(format!("Files: {}", node.file_count));
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    // ========================================================================
+    // Tree view rendering
+    // ========================================================================
+
+    fn render_tree(&mut self, ui: &mut egui::Ui) {
+        let Some(tree) = self.tree.clone() else {
+            ui.centered_and_justified(|ui| {
+                ui.label("No data");
+            });
+            return;
+        };
+
+        let Some(root) = tree.root else { return };
+
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                self.render_tree_node(ui, &tree, root, 0);
+            });
+    }
+
+    fn render_tree_node(&mut self, ui: &mut egui::Ui, tree: &FileTree, node_id: NodeId, depth: usize) {
+        let Some(node) = tree.get_node(node_id) else { return };
+
+        if !self.show_hidden && node.is_hidden {
+            return;
+        }
+
+        let is_selected = self.selected_node == Some(node_id);
+        let is_expanded = self.expanded_nodes.contains(&node_id);
+        let has_children = node.is_dir && !tree.get_children(node_id).is_empty();
+
+        let indent = depth as f32 * 20.0;
+        let color = self.get_file_color(node);
+
+        // Calculate percentage of parent
+        let parent_size = if depth == 0 {
+            node.size
+        } else {
+            node_id.ancestors(&tree.arena)
+                .nth(1)
+                .and_then(|p| tree.get_node(p))
+                .map(|p| p.size)
+                .unwrap_or(node.size)
+        };
+        let percent = if parent_size > 0 {
+            (node.size as f64 / parent_size as f64 * 100.0) as u8
+        } else {
+            0
+        };
+
+        ui.horizontal(|ui| {
+            ui.add_space(indent);
+
+            // Expand button
+            if has_children {
+                let icon = if is_expanded { "▼" } else { "▶" };
+                if ui.small_button(RichText::new(icon).size(10.0)).clicked() {
+                    if is_expanded {
+                        self.expanded_nodes.remove(&node_id);
+                    } else {
+                        self.expanded_nodes.insert(node_id);
+                    }
+                }
+            } else {
+                ui.add_space(18.0);
+            }
+
+            // Color indicator
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(12.0, 12.0), egui::Sense::hover());
+            ui.painter().rect_filled(rect, Rounding::same(2.0), color);
+
+            // Icon
+            let icon = if node.is_dir {
+                if is_expanded { "📂" } else { "📁" }
+            } else {
+                match node.extension.as_deref() {
+                    Some("mp3") | Some("wav") | Some("flac") => "🎵",
+                    Some("mp4") | Some("mkv") | Some("avi") => "🎬",
+                    Some("jpg") | Some("png") | Some("gif") => "🖼",
+                    Some("zip") | Some("tar") | Some("gz") => "📦",
+                    Some("pdf") | Some("doc") | Some("txt") => "📄",
+                    _ => "📄",
+                }
+            };
+            ui.label(icon);
+
+            // Name
+            let name_text = RichText::new(&node.name).color(if is_selected {
+                Color32::WHITE
+            } else {
+                self.theme.text_primary
+            });
+
+            let response = ui.selectable_label(is_selected, name_text);
+            if response.clicked() {
+                self.selected_node = Some(node_id);
+                if has_children {
+                    if is_expanded {
+                        self.expanded_nodes.remove(&node_id);
+                    } else {
+                        self.expanded_nodes.insert(node_id);
+                    }
+                }
+            }
+
+            // Size bar
+            let bar_width = 60.0;
+            let bar_height = 8.0;
+            let (bar_rect, _) = ui.allocate_exact_size(Vec2::new(bar_width, bar_height), egui::Sense::hover());
+
+            // Background
+            ui.painter().rect_filled(bar_rect, Rounding::same(2.0), self.theme.bg_light);
+
+            // Fill
+            let fill_width = bar_width * (percent as f32 / 100.0);
+            let fill_rect = Rect::from_min_size(bar_rect.min, Vec2::new(fill_width, bar_height));
+            ui.painter().rect_filled(fill_rect, Rounding::same(2.0), color);
+
+            // Size text
+            ui.label(RichText::new(Self::format_size(node.size)).color(self.theme.text_secondary).size(11.0));
+            ui.label(RichText::new(format!("{}%", percent)).color(self.theme.text_secondary).size(11.0));
+        });
+
+        // Children
+        if is_expanded && has_children {
+            let mut children: Vec<NodeId> = tree.get_children(node_id);
+            children.sort_by(|&a, &b| {
+                let sa = tree.get_node(a).map(|n| n.size).unwrap_or(0);
+                let sb = tree.get_node(b).map(|n| n.size).unwrap_or(0);
+                sb.cmp(&sa)
+            });
+
+            for child_id in children {
+                self.render_tree_node(ui, tree, child_id, depth + 1);
+            }
         }
     }
 }
 
 impl eframe::App for DataXApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Poll for scan progress
-        self.poll_scan_progress();
+        // Auto-start scan on first frame
+        if !self.scan_started {
+            self.scan_started = true;
+            self.start_scan();
+        }
 
-        // Request repaint if scanning (for progress updates)
+        // Poll progress
+        self.poll_progress();
+
         if self.scan_state == ScanState::Scanning {
             ctx.request_repaint();
         }
 
-        // Top menu bar
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Open folder...").clicked() {
-                        // TODO: Open folder dialog
-                        ui.close_menu();
-                    }
-                    if ui.button("Rescan").clicked() {
-                        let options = ScanOptions {
-                            root_path: self.root_path.clone(),
-                            max_depth: None,
-                            exclude_patterns: vec![],
-                            cross_mount: true,
-                            apparent_size: false,
-                        };
-                        self.start_scan(options);
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    if ui.button("Quit").clicked() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                });
+        // Top panel with controls
+        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading(RichText::new("Data-X").strong());
+                ui.separator();
 
-                ui.menu_button("View", |ui| {
-                    if ui
-                        .selectable_label(self.view_mode == GuiViewMode::Tree, "Tree")
-                        .clicked()
-                    {
-                        self.view_mode = GuiViewMode::Tree;
-                        ui.close_menu();
-                    }
-                    if ui
-                        .selectable_label(self.view_mode == GuiViewMode::Treemap, "Treemap")
-                        .clicked()
-                    {
-                        self.view_mode = GuiViewMode::Treemap;
-                        ui.close_menu();
-                    }
-                    if ui
-                        .selectable_label(self.view_mode == GuiViewMode::Split, "Split")
-                        .clicked()
-                    {
-                        self.view_mode = GuiViewMode::Split;
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    if ui.checkbox(&mut self.show_hidden, "Show hidden files").clicked() {
-                        ui.close_menu();
-                    }
-                    if ui.checkbox(&mut self.show_stats, "Show statistics").clicked() {
-                        ui.close_menu();
-                    }
-                });
+                // View mode buttons
+                if ui.selectable_label(self.view_mode == ViewMode::Treemap, "🗺 Treemap").clicked() {
+                    self.view_mode = ViewMode::Treemap;
+                    self.treemap_rects.clear();
+                }
+                if ui.selectable_label(self.view_mode == ViewMode::Tree, "🌳 Tree").clicked() {
+                    self.view_mode = ViewMode::Tree;
+                }
+                if ui.selectable_label(self.view_mode == ViewMode::Split, "⊞ Split").clicked() {
+                    self.view_mode = ViewMode::Split;
+                    self.treemap_rects.clear();
+                }
 
-                ui.menu_button("Help", |ui| {
-                    if ui.button("About").clicked() {
-                        // TODO: Show about dialog
-                        ui.close_menu();
-                    }
-                });
+                ui.separator();
 
-                // Right-aligned path and view mode
+                // Navigation for treemap
+                if self.treemap_root.is_some() && self.treemap_root != self.tree.as_ref().and_then(|t| t.root) {
+                    if ui.button("⬆ Up").clicked() {
+                        if let Some(ref tree) = self.tree {
+                            if let Some(current_root) = self.treemap_root {
+                                let parent = current_root.ancestors(&tree.arena).nth(1);
+                                self.treemap_root = parent.or(tree.root);
+                                self.treemap_rects.clear();
+                            }
+                        }
+                    }
+                }
+
+                ui.separator();
+
+                ui.checkbox(&mut self.show_hidden, "Hidden");
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("View: {}", self.view_mode.display_name()));
-                    ui.separator();
-                    ui.label(format!("Path: {}", self.root_path.display()));
+                    // Path display
+                    let path_str = self.root_path.display().to_string();
+                    ui.label(RichText::new(&path_str).color(self.theme.text_secondary));
                 });
             });
         });
@@ -472,382 +800,124 @@ impl eframe::App for DataXApp {
                     }
                     ScanState::Scanning => {
                         ui.spinner();
-                        ui.label(format!(
-                            "Scanning... {} files found ({})",
-                            self.scan_progress.files_found,
-                            self.scan_progress.elapsed_string()
-                        ));
+                        ui.label(format!("Scanning... {} files", self.scan_progress.files_found));
 
-                        // Progress bar
-                        let progress = self.scan_progress.progress_percent();
-                        ui.add(
-                            egui::ProgressBar::new(progress)
-                                .show_percentage()
-                                .animate(true),
-                        );
-
-                        // Current path being scanned (truncated)
-                        let current_path = &self.scan_progress.current_path;
-                        if current_path.len() > 50 {
-                            ui.label(format!("...{}", &current_path[current_path.len() - 47..]));
-                        } else {
-                            ui.label(current_path);
+                        // Truncated current path
+                        let path = &self.scan_progress.current_path;
+                        if path.len() > 60 {
+                            ui.label(RichText::new(format!("...{}", &path[path.len()-57..])).color(self.theme.text_secondary));
                         }
                     }
                     ScanState::Complete => {
                         ui.label(format!(
-                            "Complete: {} files, {}",
+                            "✓ {} files  •  {}",
                             self.scan_progress.total_files,
                             Self::format_size(self.scan_progress.total_size)
                         ));
 
-                        // Show disk usage if available
-                        if let Some(ref disk_info) = self.disk_info {
+                        if let Some(ref disk) = self.disk_info {
                             ui.separator();
-                            let used_percent =
-                                (disk_info.used as f64 / disk_info.total as f64 * 100.0) as u64;
+                            let used_pct = (disk.used as f64 / disk.total as f64 * 100.0) as u32;
                             ui.label(format!(
-                                "Disk: {} / {} ({}% used)",
-                                Self::format_size(disk_info.used),
-                                Self::format_size(disk_info.total),
-                                used_percent
+                                "Disk: {} / {} ({}%)",
+                                Self::format_size(disk.used),
+                                Self::format_size(disk.total),
+                                used_pct
                             ));
                         }
                     }
-                    ScanState::Error(err) => {
-                        ui.colored_label(egui::Color32::RED, format!("Error: {}", err));
+                    ScanState::Error(e) => {
+                        ui.label(RichText::new(format!("Error: {}", e)).color(Color32::RED));
                     }
                 }
 
-                // Right-aligned selection info
+                // Selected item info
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(node) = self.get_selected_node_data() {
-                        ui.label(format!("{} - {}", node.name, Self::format_size(node.size)));
+                    if let Some(node_id) = self.selected_node {
+                        if let Some(ref tree) = self.tree {
+                            if let Some(node) = tree.get_node(node_id) {
+                                ui.label(format!("{} • {}", node.name, Self::format_size(node.size)));
+                            }
+                        }
                     }
                 });
             });
         });
 
-        // Left panel - Tree view
-        if self.show_left_panel && (self.view_mode == GuiViewMode::Tree || self.view_mode == GuiViewMode::Split) {
-            egui::SidePanel::left("tree_panel")
-                .default_width(self.left_panel_width)
-                .resizable(true)
-                .show(ctx, |ui| {
-                    ui.heading("File Tree");
-                    ui.separator();
-
-                    // Search box
-                    ui.horizontal(|ui| {
-                        ui.label("Search:");
-                        ui.text_edit_singleline(&mut self.search_query);
-                    });
-                    ui.separator();
-
-                    // Tree view
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            self.render_tree_view(ui);
-                        });
-                });
-        }
-
-        // Right panel - Details or Statistics
-        if self.show_right_panel && self.show_stats {
-            egui::SidePanel::right("stats_panel")
-                .default_width(self.right_panel_width)
-                .resizable(true)
-                .show(ctx, |ui| {
-                    ui.heading("Statistics");
-                    ui.separator();
-
-                    if let Some(ref _tree) = self.tree {
-                        // TODO: Render file type statistics
-                        ui.label("File type statistics will appear here");
-                    } else {
-                        ui.label("No data available");
-                    }
-                });
-        } else if self.show_right_panel {
-            egui::SidePanel::right("details_panel")
-                .default_width(self.right_panel_width)
-                .resizable(true)
-                .show(ctx, |ui| {
-                    ui.heading("Details");
-                    ui.separator();
-
-                    if let Some(node) = self.get_selected_node_data() {
-                        egui::Grid::new("details_grid")
-                            .num_columns(2)
-                            .spacing([20.0, 4.0])
-                            .show(ui, |ui| {
-                                ui.label("Name:");
-                                ui.label(&node.name);
-                                ui.end_row();
-
-                                ui.label("Path:");
-                                ui.label(node.path.display().to_string());
-                                ui.end_row();
-
-                                ui.label("Size:");
-                                ui.label(Self::format_size(node.size));
-                                ui.end_row();
-
-                                ui.label("Type:");
-                                ui.label(if node.is_dir { "Directory" } else { "File" });
-                                ui.end_row();
-
-                                if node.is_dir {
-                                    ui.label("Files:");
-                                    ui.label(format!("{}", node.file_count));
-                                    ui.end_row();
-                                }
-
-                                if let Some(ref ext) = node.extension {
-                                    ui.label("Extension:");
-                                    ui.label(ext);
-                                    ui.end_row();
-                                }
-
-                                if let Some(modified) = node.modified {
-                                    ui.label("Modified:");
-                                    if let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH) {
-                                        let datetime = chrono::DateTime::from_timestamp(
-                                            duration.as_secs() as i64,
-                                            0,
-                                        );
-                                        if let Some(dt) = datetime {
-                                            ui.label(dt.format("%Y-%m-%d %H:%M:%S").to_string());
-                                        } else {
-                                            ui.label("Unknown");
-                                        }
-                                    } else {
-                                        ui.label("Unknown");
-                                    }
-                                    ui.end_row();
-                                }
-
-                                if node.is_hidden {
-                                    ui.label("Hidden:");
-                                    ui.label("Yes");
-                                    ui.end_row();
-                                }
-
-                                if node.is_symlink {
-                                    ui.label("Symlink:");
-                                    if let Some(ref target) = node.symlink_target {
-                                        ui.label(target.display().to_string());
-                                    } else {
-                                        ui.label("Yes");
-                                    }
-                                    ui.end_row();
-                                }
-                            });
-                    } else {
-                        ui.label("Select a file or directory to see details");
-                    }
-                });
-        }
-
-        // Central panel - Main content area
+        // Main content
         egui::CentralPanel::default().show(ctx, |ui| {
-            match self.view_mode {
-                GuiViewMode::Tree => {
-                    // Tree is in left panel, show details here if no right panel
-                    if !self.show_right_panel {
-                        self.render_details_panel(ui);
-                    } else {
-                        ui.centered_and_justified(|ui| {
-                            ui.label("Select items in the tree view");
+            if self.tree.is_none() {
+                ui.centered_and_justified(|ui| {
+                    if self.scan_state == ScanState::Scanning {
+                        ui.vertical_centered(|ui| {
+                            ui.spinner();
+                            ui.add_space(10.0);
+                            ui.label(RichText::new("Scanning...").size(18.0));
+                            ui.label(format!("{} files found", self.scan_progress.files_found));
                         });
+                    } else {
+                        ui.label("No data");
                     }
-                }
-                GuiViewMode::Treemap => {
-                    // Treemap visualization
+                });
+                return;
+            }
+
+            match self.view_mode {
+                ViewMode::Treemap => {
                     self.render_treemap(ui);
                 }
-                GuiViewMode::Split => {
-                    // Tree is in left panel, treemap in center
-                    self.render_treemap(ui);
+                ViewMode::Tree => {
+                    self.render_tree(ui);
+                }
+                ViewMode::Split => {
+                    ui.columns(2, |cols| {
+                        // Tree on left
+                        cols[0].push_id("tree_col", |ui| {
+                            let mut app = std::mem::take(self);
+                            app.render_tree(ui);
+                            *self = app;
+                        });
+
+                        // Treemap on right
+                        cols[1].push_id("treemap_col", |ui| {
+                            let mut app = std::mem::take(self);
+                            app.render_treemap(ui);
+                            *self = app;
+                        });
+                    });
                 }
             }
         });
     }
 }
 
-impl DataXApp {
-    /// Render the file tree view.
-    fn render_tree_view(&mut self, ui: &mut egui::Ui) {
-        if let Some(tree) = self.tree.clone() {
-            if let Some(root) = tree.root {
-                self.render_tree_node(ui, &tree, root, 0);
-            }
-        } else if self.scan_state == ScanState::Scanning {
-            ui.label("Scanning...");
-        } else {
-            ui.label("No data. Start a scan to analyze disk usage.");
+impl Default for DataXApp {
+    fn default() -> Self {
+        Self {
+            tree: None,
+            root_path: PathBuf::from("."),
+            selected_node: None,
+            expanded_nodes: HashSet::new(),
+            hovered_node: None,
+            view_mode: ViewMode::Treemap,
+            show_hidden: false,
+            search_query: String::new(),
+            disk_info: None,
+            scan_state: ScanState::Idle,
+            scan_progress: ScanProgressInfo::default(),
+            progress_receiver: None,
+            treemap_rects: Vec::new(),
+            treemap_root: None,
+            theme: Theme::default(),
+            scan_started: false,
         }
     }
+}
 
-    /// Render a single tree node and its children recursively.
-    fn render_tree_node(&mut self, ui: &mut egui::Ui, tree: &FileTree, node_id: NodeId, depth: usize) {
-        let Some(node) = tree.get_node(node_id) else {
-            return;
-        };
-
-        // Filter hidden files
-        if !self.show_hidden && node.is_hidden {
-            return;
-        }
-
-        // Filter by search query
-        if !self.search_query.is_empty() {
-            let query_lower = self.search_query.to_lowercase();
-            if !node.name_lower.contains(&query_lower) {
-                // Check if any child matches
-                let has_matching_child = tree
-                    .get_children(node_id)
-                    .iter()
-                    .any(|&child_id| {
-                        tree.get_node(child_id)
-                            .map(|c| c.name_lower.contains(&query_lower))
-                            .unwrap_or(false)
-                    });
-                if !has_matching_child && depth > 0 {
-                    return;
-                }
-            }
-        }
-
-        let is_selected = self.selected_node == Some(node_id);
-        let is_expanded = self.expanded_nodes.contains(&node_id);
-        let has_children = !tree.get_children(node_id).is_empty();
-
-        // Indentation
-        let indent = depth as f32 * 16.0;
-
-        ui.horizontal(|ui| {
-            ui.add_space(indent);
-
-            // Expand/collapse button or spacer
-            if node.is_dir && has_children {
-                let icon = if is_expanded { "\u{25BC}" } else { "\u{25B6}" }; // Down/Right triangles
-                if ui.small_button(icon).clicked() {
-                    self.toggle_node(node_id);
-                }
-            } else {
-                ui.add_space(20.0);
-            }
-
-            // Icon
-            let icon = if node.is_dir {
-                if is_expanded {
-                    "\u{1F4C2}" // Open folder
-                } else {
-                    "\u{1F4C1}" // Closed folder
-                }
-            } else {
-                "\u{1F4C4}" // File
-            };
-            ui.label(icon);
-
-            // Name and size
-            let label_text = format!("{} ({})", node.name, Self::format_size(node.size));
-            let response = ui.selectable_label(is_selected, label_text);
-
-            if response.clicked() {
-                self.select_node(node_id);
-                if node.is_dir {
-                    self.toggle_node(node_id);
-                }
-            }
-
-            if response.double_clicked() && node.is_dir {
-                // Double-click to drill down
-                self.expanded_nodes.insert(node_id);
-            }
-        });
-
-        // Render children if expanded
-        if is_expanded && node.is_dir {
-            let mut children: Vec<NodeId> = tree.get_children(node_id);
-
-            // Sort children by size (largest first)
-            children.sort_by(|&a, &b| {
-                let size_a = tree.get_node(a).map(|n| n.size).unwrap_or(0);
-                let size_b = tree.get_node(b).map(|n| n.size).unwrap_or(0);
-                size_b.cmp(&size_a)
-            });
-
-            for child_id in children {
-                self.render_tree_node(ui, tree, child_id, depth + 1);
-            }
-        }
-    }
-
-    /// Render the treemap visualization.
-    fn render_treemap(&self, ui: &mut egui::Ui) {
-        let available_rect = ui.available_rect_before_wrap();
-
-        if self.tree.is_none() {
-            ui.centered_and_justified(|ui| {
-                if self.scan_state == ScanState::Scanning {
-                    ui.spinner();
-                    ui.label("Scanning...");
-                } else {
-                    ui.label("No data. Start a scan to analyze disk usage.");
-                }
-            });
-            return;
-        }
-
-        // Placeholder treemap - draw colored rectangles
-        ui.painter().rect_filled(
-            available_rect,
-            0.0,
-            egui::Color32::from_rgb(40, 40, 50),
-        );
-
-        ui.centered_and_justified(|ui| {
-            ui.label("Treemap visualization will be rendered here");
-        });
-
-        // TODO: Implement actual treemap rendering with squarified algorithm
-    }
-
-    /// Render the details panel in the central area.
-    fn render_details_panel(&self, ui: &mut egui::Ui) {
-        if let Some(node) = self.get_selected_node_data() {
-            ui.heading(&node.name);
-            ui.separator();
-
-            egui::Grid::new("central_details_grid")
-                .num_columns(2)
-                .spacing([20.0, 8.0])
-                .show(ui, |ui| {
-                    ui.label("Path:");
-                    ui.label(node.path.display().to_string());
-                    ui.end_row();
-
-                    ui.label("Size:");
-                    ui.label(Self::format_size(node.size));
-                    ui.end_row();
-
-                    ui.label("Type:");
-                    ui.label(if node.is_dir { "Directory" } else { "File" });
-                    ui.end_row();
-
-                    if node.is_dir {
-                        ui.label("File count:");
-                        ui.label(format!("{}", node.file_count));
-                        ui.end_row();
-                    }
-                });
-        } else {
-            ui.centered_and_justified(|ui| {
-                ui.label("Select a file or directory to see details");
-            });
-        }
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max-1])
     }
 }
