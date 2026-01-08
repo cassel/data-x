@@ -1,0 +1,54 @@
+[package]
+name = "data-x"
+version = "0.1.0"
+edition = "2021"
+description = "TUI disk analyzer with colorful visualization"
+authors = ["Cassel"]
+license = "MIT"
+
+[[bin]]
+name = "data-x"
+path = "src/main.rs"
+
+[dependencies]
+# Core TUI
+ratatui = "0.28"
+crossterm = "0.28"
+
+# Parallelism
+rayon = "1.10"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# File system
+walkdir = "2"
+
+# Data structures
+indextree = "4"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Utils
+thiserror = "1"
+anyhow = "1"
+unicode-width = "0.2"
+chrono = "0.4"
+
+# Actions
+arboard = "3"
+open = "5"
+
+# Disk space
+fs2 = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+criterion = "0.5"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
