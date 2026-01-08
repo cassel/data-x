@@ -305,26 +305,44 @@ impl DataXApp {
     // ========================================================================
 
     fn render_tree_panel(&mut self, ui: &mut egui::Ui) {
-        let Some(ref tree) = self.tree.clone() else {
-            ui.centered_and_justified(|ui| {
-                ui.label("No data");
-            });
-            return;
+        let tree = match self.tree.clone() {
+            Some(t) => t,
+            None => {
+                ui.centered_and_justified(|ui| {
+                    ui.label("No data");
+                });
+                return;
+            }
         };
 
         let Some(root) = tree.root else { return };
 
+        // Collect state needed for rendering
+        let selected = self.selected_node;
+        let expanded = self.expanded_nodes.clone();
+        let show_hidden = self.show_hidden;
+
         egui::ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                self.render_tree_node(ui, &tree, root, 0);
+                self.render_tree_node_impl(ui, &tree, root, 0, selected, &expanded, show_hidden);
             });
     }
 
-    fn render_tree_node(&mut self, ui: &mut egui::Ui, tree: &FileTree, node_id: NodeId, depth: usize) {
+    fn render_tree_node_impl(
+        &mut self,
+        ui: &mut egui::Ui,
+        tree: &FileTree,
+        node_id: NodeId,
+        depth: usize,
+        selected: Option<NodeId>,
+        expanded: &HashSet<NodeId>,
+        show_hidden: bool,
+    ) {
         let Some(node) = tree.get_node(node_id) else { return };
 
-        if !self.show_hidden && node.is_hidden {
+        // Always show root (depth 0), filter hidden for others
+        if depth > 0 && !show_hidden && node.is_hidden {
             return;
         }
 
@@ -408,7 +426,7 @@ impl DataXApp {
             });
 
             for child in children {
-                self.render_tree_node(ui, tree, child, depth + 1);
+                self.render_tree_node_impl(ui, tree, child, depth + 1, selected, expanded, show_hidden);
             }
         }
     }
