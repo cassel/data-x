@@ -67,3 +67,18 @@ criterion = "0.5"
 lto = true
 codegen-units = 1
 panic = "abort"
+
+[package.metadata.bundle]
+name = "Data-X"
+identifier = "us.cassel.data-x"
+icon = ["assets/icon.icns"]
+version = "0.1.0"
+copyright = "Copyright (c) 2026 Cassel. All rights reserved."
+category = "public.app-category.utilities"
+short_description = "Disk analyzer with visual treemap"
+long_description = """
+Data-X is a fast, visual disk space analyzer.
+Features colorful treemap visualization, file type statistics,
+and intuitive navigation to help you find what's taking up space.
+"""
+osx_minimum_system_version = "10.14"
