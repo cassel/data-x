@@ -2,7 +2,7 @@
 name = "data-x"
 version = "0.1.0"
 edition = "2021"
-description = "TUI disk analyzer with colorful visualization"
+description = "Disk analyzer with GUI and TUI modes"
 authors = ["Cassel"]
 license = "MIT"
 
@@ -10,8 +10,23 @@ license = "MIT"
 name = "data-x"
 path = "src/main.rs"
 
+[features]
+default = ["gui"]
+gui = ["eframe", "egui", "egui_extras", "image"]
+tui = []
+
 [dependencies]
-# Core TUI
+# GUI (egui)
+eframe = { version = "0.29", optional = true, default-features = false, features = [
+    "default_fonts",
+    "glow",
+    "persistence",
+] }
+egui = { version = "0.29", optional = true }
+egui_extras = { version = "0.29", optional = true, features = ["image"] }
+image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
+
+# TUI (ratatui)
 ratatui = "0.28"
 crossterm = "0.28"
 

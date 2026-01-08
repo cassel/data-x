@@ -1,6 +1,8 @@
 mod app;
 mod cache;
 mod export;
+#[cfg(feature = "gui")]
+mod gui;
 mod remote;
 mod scanner;
 mod tree;
@@ -80,10 +82,21 @@ struct Args {
     /// Clear cache for the given path before scanning
     #[arg(long)]
     clear_cache: bool,
+
+    /// Force TUI mode (default is GUI when gui feature is enabled)
+    #[arg(long)]
+    tui: bool,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Determine if we should use GUI mode
+    // GUI is default when gui feature is enabled, unless --tui flag is passed
+    #[cfg(feature = "gui")]
+    let use_gui = !args.tui && !args.json;
+    #[cfg(not(feature = "gui"))]
+    let use_gui = false;
 
     // Check if this is a remote path (SSH)
     let path_str = args.path.to_string_lossy().to_string();
@@ -96,12 +109,12 @@ fn main() -> Result<()> {
             return run_remote_json_mode(&ssh_target, args.top);
         }
 
-        // TUI mode for remote
+        // TUI mode for remote (GUI not supported for remote yet)
         return run_remote_tui_mode(ssh_target, &args.color_scheme, args.no_color);
     }
 
     // Local path - resolve it
-    let root_path = args.path.canonicalize().unwrap_or(args.path);
+    let root_path = args.path.canonicalize().unwrap_or(args.path.clone());
 
     // Create scan options
     let scan_options = ScanOptions {
@@ -120,9 +133,28 @@ fn main() -> Result<()> {
         }
     }
 
-    // JSON mode - no TUI
+    // JSON mode - no TUI/GUI
     if args.json {
         return run_json_mode(scan_options, args.top);
+    }
+
+    // GUI mode (default when gui feature enabled and --tui not passed)
+    if use_gui {
+        #[cfg(feature = "gui")]
+        {
+            let options = eframe::NativeOptions {
+                viewport: egui::ViewportBuilder::default()
+                    .with_inner_size([1200.0, 800.0])
+                    .with_title("Data-X - Disk Analyzer"),
+                ..Default::default()
+            };
+            return eframe::run_native(
+                "Data-X",
+                options,
+                Box::new(|cc| Ok(Box::new(gui::DataXApp::new(cc, args.path.clone())))),
+            )
+            .map_err(|e| anyhow::anyhow!("GUI error: {}", e));
+        }
     }
 
     // TUI mode (cache disabled by default, use --use-cache to enable)
