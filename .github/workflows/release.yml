@@ -47,6 +47,9 @@ jobs:
         working-directory: ui
         run: npm ci
 
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli
+
       - name: Build TUI binary
         run: cargo build --release --no-default-features --target ${{ matrix.target }}
 
@@ -56,13 +59,8 @@ jobs:
           cp target/${{ matrix.target }}/release/data-x target/release/data-x
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: src-tauri
-          tauriScript: npx tauri
-          args: --target ${{ matrix.target }}
+        working-directory: src-tauri
+        run: cargo tauri build --target ${{ matrix.target }}
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
@@ -95,16 +93,15 @@ jobs:
         working-directory: ui
         run: npm ci
 
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli
+
       - name: Build TUI binary
         run: cargo build --release --no-default-features
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: src-tauri
-          tauriScript: npx tauri
+        working-directory: src-tauri
+        run: cargo tauri build
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
