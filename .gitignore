@@ -7,10 +7,11 @@
 .claude/
 .codex/
 
-# Screenshots (keep icons)
+# Screenshots (keep icons and docs)
 Screenshot*.png
 *.jpg
 *.jpeg
+!docs/images/*.png
 
 # IDE
 .idea/

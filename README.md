@@ -2,7 +2,7 @@
 
 A fast, visual disk space analyzer with modern GUI and TUI interfaces.
 
-![Data-X Screenshot](assets/screenshot.png)
+![Data-X Screenshot](docs/images/screenshot.png)
 
 ## Features
 
