@@ -98,6 +98,11 @@ jobs:
       - name: Build TUI binary
         run: cargo build --release --no-default-features
 
+      - name: Copy TUI binary for bundling (Windows)
+        run: |
+          copy target\release\data-x.exe target\release\data-x
+        shell: cmd
+
       - name: Build Tauri app
         run: cargo tauri build
 
