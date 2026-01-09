@@ -32,7 +32,7 @@ use ui::{handle_key, ColorScheme};
 #[derive(Parser, Debug)]
 #[command(name = "data-x")]
 #[command(author = "Cassel")]
-#[command(version = "0.1.0")]
+#[command(version = "0.3.0")]
 #[command(about = "TUI disk analyzer with colorful visualization", long_about = None)]
 struct Args {
     /// Directory to analyze (default: current directory)

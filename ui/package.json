@@ -2,6 +2,9 @@
   "name": "data-x-ui",
   "private": true,
   "version": "0.3.0",
+  "description": "Data-X GUI - React frontend for disk analyzer",
+  "author": "Cassel <c@cassel.us>",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",

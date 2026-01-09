@@ -1,9 +1,10 @@
 [package]
 name = "data-x"
 version = "0.3.0"
-description = "Disk analyzer with sunburst visualization"
-authors = ["Cassel"]
+description = "Fast, visual disk space analyzer"
+authors = ["Cassel <c@cassel.us>"]
 license = "MIT"
+repository = "https://github.com/cassel/data-x"
 edition = "2021"
 
 [lib]
