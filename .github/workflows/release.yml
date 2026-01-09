@@ -36,7 +36,7 @@ jobs:
           cache-dependency-path: ui/package-lock.json
 
       - name: Install Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
@@ -86,7 +86,7 @@ jobs:
           cache-dependency-path: ui/package-lock.json
 
       - name: Install Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
