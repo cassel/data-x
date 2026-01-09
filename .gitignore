@@ -1,14 +1,14 @@
 # Rust
 /target/
-Cargo.lock
+/src-tauri/target/
 
 # Agent configs (local)
 .agent/
 .claude/
 .codex/
 
-# Screenshots
-*.png
+# Screenshots (keep icons)
+Screenshot*.png
 *.jpg
 *.jpeg
 
@@ -28,6 +28,11 @@ Cargo.lock
 *.app/
 *.dmg
 *.pkg
+/dist/
+
+# Node
+node_modules/
+ui/dist/
 
 # Debug
 *.log
@@ -35,3 +40,4 @@ Cargo.lock
 
 # BMAD output (planning artifacts)
 /_bmad-output/
+/_bmad/

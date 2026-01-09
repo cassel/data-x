@@ -1,4 +1,4 @@
-//! Data-X GUI - Disk Inventory X inspired design
+//! Data-X GUI v0.2.0 - Disk Inventory X inspired design
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -6,11 +6,12 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::Instant;
 
-use eframe::egui::{self, Color32, Pos2, Rect, RichText, Rounding, Stroke, Vec2};
+use eframe::egui::{self, Color32, Key, Modifiers, Pos2, Rect, RichText, Rounding, Stroke, Vec2};
 use indextree::NodeId;
+use rfd::FileDialog;
 
 use crate::scanner::{get_disk_space, DiskSpaceInfo, ScanOptions, ScanProgress, Scanner};
-use crate::tree::{FileNode, FileTree};
+use crate::tree::FileTree;
 
 // ============================================================================
 // File Type Categories & Colors (Disk Inventory X style)
@@ -145,6 +146,13 @@ pub struct DataXApp {
     treemap_root: Option<NodeId>,
     needs_rebuild: bool,
     last_treemap_size: Vec2,
+
+    // Dialogs (v0.2.0)
+    show_about: bool,
+    show_shortcuts: bool,
+
+    // Recent folders (v0.2.0)
+    recent_folders: Vec<PathBuf>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -182,7 +190,7 @@ impl DataXApp {
 
         Self {
             tree: None,
-            root_path,
+            root_path: root_path.clone(),
             selected_node: None,
             expanded_nodes: HashSet::new(),
             hovered_node: None,
@@ -197,6 +205,9 @@ impl DataXApp {
             treemap_root: None,
             needs_rebuild: true,
             last_treemap_size: Vec2::ZERO,
+            show_about: false,
+            show_shortcuts: false,
+            recent_folders: vec![root_path],
         }
     }
 
@@ -301,6 +312,257 @@ impl DataXApp {
     }
 
     // ========================================================================
+    // v0.2.0: Folder Picker
+    // ========================================================================
+
+    fn open_folder_dialog(&mut self) {
+        if let Some(path) = FileDialog::new()
+            .set_directory(&self.root_path)
+            .pick_folder()
+        {
+            self.change_root_path(path);
+        }
+    }
+
+    fn change_root_path(&mut self, path: PathBuf) {
+        // Add to recent
+        self.add_to_recent(&path);
+
+        // Reset state
+        self.root_path = path;
+        self.tree = None;
+        self.selected_node = None;
+        self.expanded_nodes.clear();
+        self.treemap_rects.clear();
+        self.treemap_root = None;
+        self.category_stats.clear();
+        self.needs_rebuild = true;
+        self.scan_started = false;
+    }
+
+    fn add_to_recent(&mut self, path: &PathBuf) {
+        self.recent_folders.retain(|p| p != path);
+        self.recent_folders.insert(0, path.clone());
+        self.recent_folders.truncate(10);
+    }
+
+    // ========================================================================
+    // v0.2.0: Keyboard Shortcuts
+    // ========================================================================
+
+    fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) -> bool {
+        let mut handled = false;
+
+        ctx.input_mut(|i| {
+            // Cmd+O - Open folder
+            if i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::O)) {
+                handled = true;
+            }
+
+            // Cmd+R - Refresh
+            if i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::R)) {
+                self.scan_started = false;
+                self.tree = None;
+                self.needs_rebuild = true;
+                handled = true;
+            }
+
+            // Cmd+H - Toggle hidden
+            if i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::H)) {
+                self.show_hidden = !self.show_hidden;
+                self.needs_rebuild = true;
+                handled = true;
+            }
+
+            // Cmd+/ - Show shortcuts
+            if i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::Slash)) {
+                self.show_shortcuts = !self.show_shortcuts;
+                handled = true;
+            }
+
+            // Escape - Close dialogs
+            if i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, Key::Escape)) {
+                if self.show_about || self.show_shortcuts {
+                    self.show_about = false;
+                    self.show_shortcuts = false;
+                    handled = true;
+                }
+            }
+
+            // Cmd+C - Copy path
+            if i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::COMMAND, Key::C)) {
+                if let Some(node_id) = self.selected_node {
+                    if let Some(ref tree) = self.tree {
+                        if let Some(node) = tree.get_node(node_id) {
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                let _ = clipboard.set_text(node.path.display().to_string());
+                            }
+                        }
+                    }
+                }
+                handled = true;
+            }
+        });
+
+        // Cmd+O needs to be outside input_mut because it opens a dialog
+        if handled {
+            return handled;
+        }
+
+        ctx.input(|i| {
+            if i.modifiers.command && i.key_pressed(Key::O) {
+                true
+            } else {
+                false
+            }
+        })
+    }
+
+    // ========================================================================
+    // v0.2.0: Dialogs
+    // ========================================================================
+
+    fn render_about_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_about {
+            return;
+        }
+
+        egui::Window::new("About Data-X")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(10.0);
+                    ui.heading(RichText::new("Data-X").size(24.0).strong());
+                    ui.label(RichText::new("Version 0.2.0").size(14.0).color(Color32::from_rgb(150, 150, 160)));
+                    ui.add_space(15.0);
+                    ui.label("A fast, visual disk space analyzer");
+                    ui.label("with treemap visualization");
+                    ui.add_space(15.0);
+                    ui.label(RichText::new("2026 Cassel").size(12.0).color(Color32::from_rgb(120, 120, 130)));
+                    ui.add_space(15.0);
+                    if ui.button("Close").clicked() {
+                        self.show_about = false;
+                    }
+                });
+            });
+    }
+
+    fn render_shortcuts_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_shortcuts {
+            return;
+        }
+
+        egui::Window::new("Keyboard Shortcuts")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(300.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                egui::Grid::new("shortcuts_grid")
+                    .num_columns(2)
+                    .spacing([40.0, 8.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        let shortcuts = [
+                            ("Cmd+O", "Open Folder"),
+                            ("Cmd+R", "Refresh / Rescan"),
+                            ("Cmd+H", "Toggle Hidden Files"),
+                            ("Cmd+C", "Copy Selected Path"),
+                            ("Cmd+/", "Show Shortcuts"),
+                            ("Esc", "Close Dialogs"),
+                            ("Click", "Select Item"),
+                            ("Double-Click", "Enter Directory"),
+                        ];
+
+                        for (key, desc) in shortcuts {
+                            ui.label(RichText::new(key).strong().color(Color32::from_rgb(100, 180, 255)));
+                            ui.label(desc);
+                            ui.end_row();
+                        }
+                    });
+
+                ui.add_space(10.0);
+                ui.vertical_centered(|ui| {
+                    if ui.button("Close").clicked() {
+                        self.show_shortcuts = false;
+                    }
+                });
+            });
+    }
+
+    // ========================================================================
+    // v0.2.0: Menu Bar
+    // ========================================================================
+
+    fn render_menu_bar(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut open_folder = false;
+
+        egui::menu::bar(ui, |ui| {
+            ui.menu_button("File", |ui| {
+                if ui.button("Open Folder...    Cmd+O").clicked() {
+                    open_folder = true;
+                    ui.close_menu();
+                }
+
+                ui.menu_button("Recent Folders", |ui| {
+                    if self.recent_folders.is_empty() {
+                        ui.label("No recent folders");
+                    } else {
+                        for path in self.recent_folders.clone() {
+                            let display = path.file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_else(|| path.display().to_string());
+                            if ui.button(&display).on_hover_text(path.display().to_string()).clicked() {
+                                self.change_root_path(path);
+                                ui.close_menu();
+                            }
+                        }
+                    }
+                });
+
+                ui.separator();
+
+                if ui.button("Refresh    Cmd+R").clicked() {
+                    self.scan_started = false;
+                    self.tree = None;
+                    self.needs_rebuild = true;
+                    ui.close_menu();
+                }
+
+                ui.separator();
+
+                if ui.button("Quit    Cmd+Q").clicked() {
+                    std::process::exit(0);
+                }
+            });
+
+            ui.menu_button("View", |ui| {
+                if ui.checkbox(&mut self.show_hidden, "Show Hidden Files    Cmd+H").changed() {
+                    self.needs_rebuild = true;
+                }
+            });
+
+            ui.menu_button("Help", |ui| {
+                if ui.button("Keyboard Shortcuts    Cmd+/").clicked() {
+                    self.show_shortcuts = true;
+                    ui.close_menu();
+                }
+
+                ui.separator();
+
+                if ui.button("About Data-X").clicked() {
+                    self.show_about = true;
+                    ui.close_menu();
+                }
+            });
+        });
+
+        open_folder
+    }
+
+    // ========================================================================
     // LEFT PANEL: File Tree
     // ========================================================================
 
@@ -352,7 +614,7 @@ impl DataXApp {
 
         let indent = depth as f32 * 16.0;
         let cat = FileCategory::from_extension(node.extension.as_deref());
-        let color = if node.is_dir { Color32::from_rgb(130, 170, 220) } else { cat.color() };
+        let color = if node.is_dir { Color32::from_rgb(70, 130, 200) } else { cat.color() };
 
         // Row
         let row_response = ui.horizontal(|ui| {
@@ -611,9 +873,9 @@ impl DataXApp {
                 hovered = Some(tr.node_id);
             }
 
-            // Base color
+            // Base color - directories use consistent blue
             let base = if tr.is_dir {
-                Color32::from_rgb(80, 100, 130)
+                Color32::from_rgb(60, 110, 180)
             } else {
                 tr.category.color()
             };
@@ -812,12 +1074,27 @@ impl eframe::App for DataXApp {
             ctx.request_repaint();
         }
 
-        // Top bar
-        egui::TopBottomPanel::top("top").min_height(32.0).show(ctx, |ui| {
-            ui.horizontal_centered(|ui| {
-                ui.heading(RichText::new("Data-X").strong().size(16.0));
-                ui.separator();
+        // Handle keyboard shortcuts
+        let open_folder_shortcut = self.handle_keyboard_shortcuts(ctx);
 
+        // Render dialogs
+        self.render_about_dialog(ctx);
+        self.render_shortcuts_dialog(ctx);
+
+        // Menu bar
+        let mut open_folder_menu = false;
+        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+            open_folder_menu = self.render_menu_bar(ui);
+        });
+
+        // Open folder dialog if requested
+        if open_folder_shortcut || open_folder_menu {
+            self.open_folder_dialog();
+        }
+
+        // Toolbar
+        egui::TopBottomPanel::top("toolbar").min_height(32.0).show(ctx, |ui| {
+            ui.horizontal_centered(|ui| {
                 // Up button
                 if self.treemap_root.is_some() && self.treemap_root != self.tree.as_ref().and_then(|t| t.root) {
                     if ui.button("⬆ Up").clicked() {
@@ -831,8 +1108,7 @@ impl eframe::App for DataXApp {
                     ui.separator();
                 }
 
-                ui.checkbox(&mut self.show_hidden, "Show Hidden");
-
+                // Path display
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(RichText::new(self.root_path.display().to_string()).size(12.0).color(Color32::from_rgb(150, 150, 160)));
                 });
@@ -931,6 +1207,9 @@ impl Default for DataXApp {
             treemap_root: None,
             needs_rebuild: true,
             last_treemap_size: Vec2::ZERO,
+            show_about: false,
+            show_shortcuts: false,
+            recent_folders: Vec::new(),
         }
     }
 }
