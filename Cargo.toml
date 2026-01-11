@@ -1,6 +1,6 @@
 [package]
 name = "data-x"
-version = "0.3.0"
+version = "0.4.1"
 edition = "2021"
 description = "Fast, visual disk space analyzer with GUI and TUI"
 authors = ["Cassel <c@cassel.us>"]
@@ -77,7 +77,7 @@ panic = "abort"
 name = "Data-X"
 identifier = "us.cassel.data-x"
 icon = ["assets/icon.icns"]
-version = "0.2.0"
+version = "0.4.1"
 copyright = "Copyright (c) 2026 Cassel. All rights reserved."
 category = "public.app-category.utilities"
 short_description = "Disk analyzer with visual treemap"

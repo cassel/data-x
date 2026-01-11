@@ -1,7 +1,7 @@
 {
   "name": "data-x-ui",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Data-X GUI - React frontend for disk analyzer",
   "author": "Cassel <c@cassel.us>",
   "license": "MIT",
