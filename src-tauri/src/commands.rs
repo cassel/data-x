@@ -4,8 +4,12 @@ use std::path::Path;
 use std::time::Instant;
 use tauri::{command, AppHandle};
 
+use crate::duplicates::{self, DuplicateScanConfig, DuplicateScanResult};
 use crate::scanner;
+use crate::ssh::{self, SSHConnection, SSHConnectionInput, SSHTestResult};
 use crate::types::{DiskInfo, FileNode, ScanResult};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 /// Scan a directory and return the file tree (with progress events)
 #[command]
@@ -222,4 +226,148 @@ pub async fn open_in_terminal(path: Option<String>) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+// =============================================================================
+// SSH Commands
+// =============================================================================
+
+/// Get all stored SSH connections
+#[command]
+pub fn get_ssh_connections() -> Result<Vec<SSHConnection>, String> {
+    ssh::get_all_connections()
+}
+
+/// Get a specific SSH connection by ID
+#[command]
+pub fn get_ssh_connection(id: String) -> Result<Option<SSHConnection>, String> {
+    ssh::get_connection(&id)
+}
+
+/// Save a new SSH connection
+#[command]
+pub fn save_ssh_connection(connection: SSHConnectionInput) -> Result<SSHConnection, String> {
+    ssh::save_connection(connection)
+}
+
+/// Update an existing SSH connection
+#[command]
+pub fn update_ssh_connection(connection: SSHConnectionInput) -> Result<SSHConnection, String> {
+    ssh::update_connection(connection)
+}
+
+/// Delete an SSH connection
+#[command]
+pub fn delete_ssh_connection(id: String) -> Result<(), String> {
+    ssh::delete_connection(&id)
+}
+
+/// Test an SSH connection
+#[command]
+pub fn test_ssh_connection(connection: SSHConnectionInput) -> Result<SSHTestResult, String> {
+    // Create a temporary connection object for testing
+    let temp_connection = SSHConnection {
+        id: connection.id.unwrap_or_else(|| "test".to_string()),
+        name: connection.name,
+        host: connection.host,
+        port: connection.port.unwrap_or(22),
+        username: connection.username,
+        auth_method: connection.auth_method,
+        default_path: connection.default_path,
+        timeout_secs: connection.timeout_secs.unwrap_or(30),
+        created_at: 0,
+        last_used_at: None,
+    };
+
+    ssh::test_connection(&temp_connection)
+}
+
+/// Scan a remote directory via SSH
+#[command]
+pub async fn scan_remote(
+    app: AppHandle,
+    connection_id: String,
+    path: Option<String>,
+) -> Result<ScanResult, String> {
+    // Run in blocking task to not freeze UI
+    tokio::task::spawn_blocking(move || {
+        let path_ref = path.as_deref();
+        ssh::scan_remote_directory(&connection_id, path_ref, &app)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// =============================================================================
+// Duplicate Detection Commands
+// =============================================================================
+
+/// Find duplicate files in a directory
+#[command]
+pub async fn find_duplicates(
+    app: AppHandle,
+    path: String,
+    min_size: Option<u64>,
+    include_hidden: Option<bool>,
+) -> Result<DuplicateScanResult, String> {
+    let config = DuplicateScanConfig {
+        min_size: min_size.unwrap_or(1024), // Default 1KB
+        include_hidden: include_hidden.unwrap_or(false),
+    };
+
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    let path = Path::new(&path).to_path_buf();
+
+    tokio::task::spawn_blocking(move || {
+        duplicates::find_duplicates(&app, &path, config, cancel_flag)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Delete multiple files (for batch duplicate deletion)
+#[command]
+pub async fn delete_files(paths: Vec<String>, to_trash: bool) -> Result<DeleteResult, String> {
+    let mut deleted = 0u64;
+    let mut failed: Vec<String> = Vec::new();
+    let mut bytes_freed = 0u64;
+
+    for path_str in paths {
+        let path = Path::new(&path_str);
+
+        // Get file size before deletion
+        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+
+        let result = if to_trash {
+            trash::delete(&path_str)
+        } else if path.is_dir() {
+            std::fs::remove_dir_all(path).map_err(|e| trash::Error::Unknown { description: e.to_string() })
+        } else {
+            std::fs::remove_file(path).map_err(|e| trash::Error::Unknown { description: e.to_string() })
+        };
+
+        match result {
+            Ok(()) => {
+                deleted += 1;
+                bytes_freed += size;
+            }
+            Err(e) => {
+                failed.push(format!("{}: {}", path_str, e));
+            }
+        }
+    }
+
+    Ok(DeleteResult {
+        deleted,
+        bytes_freed,
+        failed,
+    })
+}
+
+/// Result of batch delete operation
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DeleteResult {
+    pub deleted: u64,
+    pub bytes_freed: u64,
+    pub failed: Vec<String>,
 }

@@ -80,3 +80,75 @@ export function formatSize(bytes: number): string {
 
   return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`
 }
+
+// SSH Connection Types
+
+export type AuthMethod =
+  | { type: 'key'; key_path: string | null }
+  | { type: 'password' }
+  | { type: 'agent' }
+
+export interface SSHConnection {
+  id: string
+  name: string
+  host: string
+  port: number
+  username: string
+  auth_method: AuthMethod
+  default_path: string | null
+  timeout_secs: number
+  created_at: number
+  last_used_at: number | null
+}
+
+export interface SSHConnectionInput {
+  id?: string
+  name: string
+  host: string
+  port?: number
+  username: string
+  auth_method: AuthMethod
+  password?: string
+  default_path?: string
+  timeout_secs?: number
+}
+
+export interface SSHTestResult {
+  success: boolean
+  message: string
+  server_info: string | null
+  latency_ms: number | null
+}
+
+// Duplicate Detection Types
+
+export interface DuplicateFile {
+  path: string
+  size: number
+  modified: number
+}
+
+export interface DuplicateGroup {
+  hash: string
+  size: number
+  files: DuplicateFile[]
+}
+
+export interface DuplicateScanResult {
+  groups: DuplicateGroup[]
+  total_duplicates: number
+  wasted_space: number
+}
+
+export interface DuplicateScanProgress {
+  phase: string
+  files_processed: number
+  total_files: number
+  current_file: string
+}
+
+export interface DeleteResult {
+  deleted: number
+  bytes_freed: number
+  failed: string[]
+}

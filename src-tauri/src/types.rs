@@ -16,7 +16,8 @@ pub struct FileNode {
     pub file_count: u64,
 }
 
-/// Category for file type coloring
+/// Category for file type coloring (reserved for future use)
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum FileCategory {
@@ -31,6 +32,7 @@ pub enum FileCategory {
     Other,
 }
 
+#[allow(dead_code)]
 impl FileCategory {
     pub fn from_extension(ext: Option<&str>) -> Self {
         match ext.map(|e| e.to_lowercase()).as_deref() {

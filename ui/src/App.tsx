@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import { Header } from './components/Header'
 import { Sunburst } from './components/Sunburst'
 import { TreemapCanvas } from './components/TreemapCanvas'
@@ -10,15 +10,26 @@ import { BarChartCanvas } from './components/BarChartCanvas'
 import { CirclePacking } from './components/CirclePacking'
 import { FileTree } from './components/FileTree'
 import { StatusBar } from './components/StatusBar'
-import { FileNode, ScanResult, DiskInfo, formatSize } from './types'
+import { SSHConnectionList } from './components/SSHConnectionList'
+import { SSHConnectionModal } from './components/SSHConnectionModal'
+import { FilterBar } from './components/FilterBar'
+import { DuplicateScanModal } from './components/DuplicateScanModal'
+import { DuplicateResults } from './components/DuplicateResults'
+import { useSSHConnections } from './hooks/useSSHConnections'
+import { useFilters } from './hooks/useFilters'
+import { useSearch } from './hooks/useSearch'
+import { SearchResult } from './utils/search'
+import { FileNode, ScanResult, DiskInfo, SSHConnection, DuplicateScanResult, formatSize } from './types'
 
 type VisualizationType = 'treemap' | 'sunburst' | 'icicle' | 'barchart' | 'circles'
 
 interface ScanProgress {
-  files_scanned: number
-  total_files: number
+  files_found?: number
+  files_scanned?: number
+  total_files?: number
   current_path: string
-  bytes_scanned: number
+  bytes_scanned?: number
+  percent?: number
 }
 
 const visualizationLabels: Record<VisualizationType, string> = {
@@ -42,6 +53,40 @@ function App() {
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 })
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // SSH state
+  const [isRemote, setIsRemote] = useState(false)
+  const [activeConnection, setActiveConnection] = useState<SSHConnection | null>(null)
+  const [sshModalOpen, setSshModalOpen] = useState(false)
+  const [editingConnection, setEditingConnection] = useState<SSHConnection | null>(null)
+
+  // Duplicate detection state
+  const [duplicateModalOpen, setDuplicateModalOpen] = useState(false)
+  const [duplicateResult, setDuplicateResult] = useState<DuplicateScanResult | null>(null)
+
+  const {
+    connections,
+    isLoading: sshLoading,
+    saveConnection,
+    updateConnection,
+    deleteConnection,
+    testConnection,
+  } = useSSHConnections()
+
+  // Filters
+  const {
+    filters,
+    filteredData,
+    stats: filterStats,
+    activeFilterCount,
+    setSizeFilter,
+    toggleTypeFilter,
+    setAgeFilter,
+    clearFilters,
+  } = useFilters(currentNode)
+
+  // Search
+  const search = useSearch(scanResult?.root || null)
 
   // Listen for scan progress events
   useEffect(() => {
@@ -75,12 +120,14 @@ function App() {
     return () => observer.disconnect()
   }, [])
 
-  // Scan a directory
+  // Scan a directory (local)
   const scanDirectory = useCallback(async (path: string) => {
     setIsScanning(true)
     setError(null)
     setCurrentPath(path)
     setScanProgress(null)
+    setIsRemote(false)
+    setActiveConnection(null)
 
     try {
       const result = await invoke<ScanResult>('scan_directory', { path, maxDepth: 8 })
@@ -92,6 +139,33 @@ function App() {
       // Get disk info
       const disk = await invoke<DiskInfo>('get_disk_info', { path })
       setDiskInfo(disk)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setIsScanning(false)
+      setScanProgress(null)
+    }
+  }, [])
+
+  // Scan a remote directory via SSH
+  const scanRemote = useCallback(async (connection: SSHConnection, path?: string) => {
+    setIsScanning(true)
+    setError(null)
+    setIsRemote(true)
+    setActiveConnection(connection)
+    setCurrentPath(path || connection.default_path || '/')
+    setScanProgress(null)
+
+    try {
+      const result = await invoke<ScanResult>('scan_remote', {
+        connectionId: connection.id,
+        path: path || connection.default_path,
+      })
+      setScanResult(result)
+      setCurrentNode(result.root)
+      setHistory([result.root])
+      setSelectedNode(null)
+      setDiskInfo(null) // No disk info for remote
     } catch (e) {
       setError(String(e))
     } finally {
@@ -167,6 +241,184 @@ function App() {
     // Auto-scan disabled - user must select folder manually
   }, [])
 
+  // SSH handlers
+  const handleSshConnect = useCallback((connection: SSHConnection) => {
+    scanRemote(connection)
+  }, [scanRemote])
+
+  const handleSshEdit = useCallback((connection: SSHConnection) => {
+    setEditingConnection(connection)
+    setSshModalOpen(true)
+  }, [])
+
+  const handleSshDelete = useCallback(async (connection: SSHConnection) => {
+    if (confirm(`Delete connection "${connection.name}"?`)) {
+      await deleteConnection(connection.id)
+    }
+  }, [deleteConnection])
+
+  const handleSshAddNew = useCallback(() => {
+    setEditingConnection(null)
+    setSshModalOpen(true)
+  }, [])
+
+  const handleSshSave = useCallback(async (input: any) => {
+    if (editingConnection) {
+      return await updateConnection({ ...input, id: editingConnection.id })
+    } else {
+      return await saveConnection(input)
+    }
+  }, [editingConnection, updateConnection, saveConnection])
+
+  const handleRefresh = useCallback(() => {
+    if (isRemote && activeConnection) {
+      scanRemote(activeConnection, currentPath)
+    } else if (currentPath) {
+      scanDirectory(currentPath)
+    }
+  }, [isRemote, activeConnection, currentPath, scanRemote, scanDirectory])
+
+  // Handle search result selection - navigate to parent and select the file
+  const handleSearchSelect = useCallback((result: SearchResult) => {
+    // Find the parent node by traversing the path
+    const findNodeByPath = (root: FileNode, pathParts: string[]): FileNode | null => {
+      if (pathParts.length === 0) return root
+
+      const [first, ...rest] = pathParts
+      if (!root.children) return null
+
+      const child = root.children.find(c => c.name === first)
+      if (!child) return null
+
+      return rest.length === 0 ? child : findNodeByPath(child, rest)
+    }
+
+    if (!scanResult?.root) return
+
+    // Parse the parent path to find the parent folder
+    const parentParts = result.parentPath ? result.parentPath.split('/').filter(Boolean) : []
+    const parentNode = findNodeByPath(scanResult.root, parentParts)
+
+    if (parentNode) {
+      // Navigate to parent folder
+      setCurrentNode(parentNode)
+      setHistory(() => {
+        // Build path from root to parent
+        const newHistory: FileNode[] = [scanResult.root]
+        let current = scanResult.root
+        for (const part of parentParts) {
+          const child = current.children?.find(c => c.name === part)
+          if (child && child.is_dir) {
+            newHistory.push(child)
+            current = child
+          }
+        }
+        return newHistory
+      })
+      // Select the found node
+      setSelectedNode(result.node)
+    }
+
+    // Clear search
+    search.clearSearch()
+  }, [scanResult, search])
+
+  // Handle duplicate scan completion
+  const handleDuplicateScanComplete = useCallback((result: DuplicateScanResult) => {
+    setDuplicateResult(result)
+  }, [])
+
+  // Handle export to CSV
+  const handleExport = useCallback(async () => {
+    if (!currentNode) return
+
+    const date = new Date().toISOString().slice(0, 10)
+    const defaultName = `data-x-export-${date}.csv`
+
+    const filePath = await save({
+      defaultPath: defaultName,
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+    })
+
+    if (!filePath) return
+
+    // Collect all files recursively
+    const collectFiles = (node: FileNode, parentPath: string): string[] => {
+      const lines: string[] = []
+      const fullPath = parentPath ? `${parentPath}/${node.name}` : node.name
+
+      // CSV row: path, name, size_bytes, size_human, extension, is_directory
+      const row = [
+        `"${fullPath.replace(/"/g, '""')}"`,
+        `"${node.name.replace(/"/g, '""')}"`,
+        node.size,
+        `"${formatSize(node.size)}"`,
+        node.extension ? `"${node.extension}"` : '""',
+        node.is_dir ? 'true' : 'false',
+      ].join(',')
+
+      lines.push(row)
+
+      if (node.children) {
+        for (const child of node.children) {
+          lines.push(...collectFiles(child, fullPath))
+        }
+      }
+
+      return lines
+    }
+
+    const header = 'path,name,size_bytes,size_human,extension,is_directory'
+    const rows = collectFiles(currentNode, '')
+    const csvContent = '\ufeff' + header + '\n' + rows.join('\n') // BOM for Excel
+
+    try {
+      // Write using Tauri fs API
+      const { writeTextFile } = await import('@tauri-apps/plugin-fs')
+      await writeTextFile(filePath, csvContent)
+      setError(null)
+    } catch (e) {
+      setError(`Export failed: ${e}`)
+    }
+  }, [currentNode])
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle if not in an input field (except for Escape)
+      const target = e.target as HTMLElement
+      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
+
+      if (e.metaKey || e.ctrlKey) {
+        switch (e.key.toLowerCase()) {
+          case 'f':
+            // Focus search input
+            e.preventDefault()
+            const searchInput = document.querySelector('input[placeholder="Search files..."]') as HTMLInputElement
+            if (searchInput) searchInput.focus()
+            break
+          case 'e':
+            // Export to CSV
+            if (!isInput && currentPath) {
+              e.preventDefault()
+              handleExport()
+            }
+            break
+          case 'd':
+            // Find duplicates
+            if (!isInput && currentPath && !isRemote) {
+              e.preventDefault()
+              setDuplicateModalOpen(true)
+            }
+            break
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [currentPath, isRemote, handleExport])
+
   return (
     <div className="h-screen flex flex-col bg-dark-bg">
       <Header
@@ -175,13 +427,43 @@ function App() {
         onOpenFolder={openFolder}
         onGoBack={goBack}
         onGoToRoot={goToRoot}
-        onRefresh={() => currentPath && scanDirectory(currentPath)}
+        onRefresh={handleRefresh}
+        onFindDuplicates={() => setDuplicateModalOpen(true)}
+        onExport={handleExport}
+        isRemote={isRemote}
+        remoteName={activeConnection?.name}
+        searchProps={scanResult ? {
+          query: search.query,
+          results: search.results,
+          isOpen: search.isOpen,
+          selectedIndex: search.selectedIndex,
+          isSearching: search.isSearching,
+          noResults: search.noResults,
+          onQueryChange: search.handleQueryChange,
+          onClear: search.clearSearch,
+          onClose: search.closeDropdown,
+          onKeyDown: search.handleKeyDown,
+          onSelectResult: handleSearchSelect,
+          setSelectedIndex: search.setSelectedIndex,
+        } : undefined}
       />
 
       <main className="flex-1 flex overflow-hidden">
+        {/* SSH Connections sidebar - FAR LEFT */}
+        <aside className="w-56 border-r border-dark-accent bg-dark-panel overflow-hidden flex flex-col flex-shrink-0">
+          <SSHConnectionList
+            connections={connections}
+            isLoading={sshLoading}
+            onConnect={handleSshConnect}
+            onEdit={handleSshEdit}
+            onDelete={handleSshDelete}
+            onAddNew={handleSshAddNew}
+          />
+        </aside>
+
         {/* File tree sidebar - LEFT */}
         {currentNode && (
-          <aside className="w-72 border-r border-dark-accent bg-dark-panel overflow-hidden flex flex-col">
+          <aside className="w-64 border-r border-dark-accent bg-dark-panel overflow-hidden flex flex-col">
             <FileTree
               root={currentNode}
               selectedNode={selectedNode}
@@ -215,6 +497,21 @@ function App() {
             </div>
           )}
 
+          {/* Filter bar */}
+          {currentNode && !isScanning && (
+            <FilterBar
+              sizeFilter={filters.size}
+              typeFilter={filters.types}
+              ageFilter={filters.age}
+              onSizeChange={setSizeFilter}
+              onTypeToggle={toggleTypeFilter}
+              onAgeChange={setAgeFilter}
+              onClearAll={clearFilters}
+              activeFilterCount={activeFilterCount}
+              stats={filterStats}
+            />
+          )}
+
           {/* Visualization content */}
           <div ref={containerRef} className="flex-1 flex items-center justify-center p-4 overflow-auto">
             {isScanning ? (
@@ -223,22 +520,14 @@ function App() {
                 <p className="text-lg text-gray-300 mb-2">Scanning...</p>
                 {scanProgress && (
                   <div className="space-y-2">
-                    <div className="w-full h-2 bg-dark-accent rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-accent transition-all duration-200"
-                        style={{
-                          width: scanProgress.total_files > 0
-                            ? `${Math.min((scanProgress.files_scanned / scanProgress.total_files) * 100, 100)}%`
-                            : '0%'
-                        }}
-                      />
-                    </div>
                     <p className="text-sm text-gray-400">
-                      {scanProgress.files_scanned.toLocaleString()} / {scanProgress.total_files.toLocaleString()} files
+                      {(scanProgress.files_scanned ?? scanProgress.files_found ?? 0).toLocaleString()} files found
                     </p>
-                    <p className="text-xs text-gray-500">
-                      {formatSize(scanProgress.bytes_scanned)} scanned
-                    </p>
+                    {scanProgress.bytes_scanned && (
+                      <p className="text-xs text-gray-500">
+                        {formatSize(scanProgress.bytes_scanned)} scanned
+                      </p>
+                    )}
                     <p className="text-xs text-gray-600 truncate" title={scanProgress.current_path}>
                       {scanProgress.current_path.length > 50
                         ? '...' + scanProgress.current_path.slice(-47)
@@ -251,7 +540,7 @@ function App() {
               <>
                 {visualization === 'treemap' && (
                   <TreemapCanvas
-                    data={currentNode}
+                    data={filteredData || currentNode}
                     width={containerSize.width}
                     height={containerSize.height}
                     selectedNode={selectedNode}
@@ -261,7 +550,7 @@ function App() {
                 )}
                 {visualization === 'sunburst' && (
                   <Sunburst
-                    data={currentNode}
+                    data={filteredData || currentNode}
                     size={Math.min(containerSize.width, containerSize.height)}
                     selectedNode={selectedNode}
                     onSelect={setSelectedNode}
@@ -270,7 +559,7 @@ function App() {
                 )}
                 {visualization === 'icicle' && (
                   <IcicleCanvas
-                    data={currentNode}
+                    data={filteredData || currentNode}
                     width={containerSize.width}
                     height={containerSize.height}
                     selectedNode={selectedNode}
@@ -280,7 +569,7 @@ function App() {
                 )}
                 {visualization === 'barchart' && (
                   <BarChartCanvas
-                    data={currentNode}
+                    data={filteredData || currentNode}
                     width={containerSize.width}
                     height={containerSize.height}
                     selectedNode={selectedNode}
@@ -290,7 +579,7 @@ function App() {
                 )}
                 {visualization === 'circles' && (
                   <CirclePacking
-                    data={currentNode}
+                    data={filteredData || currentNode}
                     size={Math.min(containerSize.width, containerSize.height)}
                     selectedNode={selectedNode}
                     onSelect={setSelectedNode}
@@ -319,7 +608,39 @@ function App() {
         selectedNode={selectedNode}
         isScanning={isScanning}
         error={error}
+        isRemote={isRemote}
+        remoteName={activeConnection?.name}
       />
+
+      {/* SSH Connection Modal */}
+      <SSHConnectionModal
+        isOpen={sshModalOpen}
+        onClose={() => {
+          setSshModalOpen(false)
+          setEditingConnection(null)
+        }}
+        connection={editingConnection}
+        onSave={handleSshSave}
+        onTest={testConnection}
+      />
+
+      {/* Duplicate Scan Modal */}
+      <DuplicateScanModal
+        isOpen={duplicateModalOpen}
+        onClose={() => setDuplicateModalOpen(false)}
+        currentPath={currentPath}
+        onScanComplete={handleDuplicateScanComplete}
+      />
+
+      {/* Duplicate Results Modal */}
+      {duplicateResult && (
+        <DuplicateResults
+          isOpen={!!duplicateResult}
+          onClose={() => setDuplicateResult(null)}
+          result={duplicateResult}
+          onRefresh={handleRefresh}
+        />
+      )}
     </div>
   )
 }

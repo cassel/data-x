@@ -1,5 +1,5 @@
 import { FileNode, ScanResult, DiskInfo, formatSize } from '../types'
-import { HardDrive, File, Clock, AlertCircle } from 'lucide-react'
+import { HardDrive, File, Clock, AlertCircle, Globe } from 'lucide-react'
 
 interface StatusBarProps {
   scanResult: ScanResult | null
@@ -7,6 +7,8 @@ interface StatusBarProps {
   selectedNode: FileNode | null
   isScanning: boolean
   error: string | null
+  isRemote?: boolean
+  remoteName?: string
 }
 
 export function StatusBar({
@@ -15,6 +17,8 @@ export function StatusBar({
   selectedNode,
   isScanning,
   error,
+  isRemote = false,
+  remoteName,
 }: StatusBarProps) {
   const diskPercent = diskInfo
     ? Math.round((diskInfo.used / diskInfo.total) * 100)
@@ -24,8 +28,8 @@ export function StatusBar({
     <footer className="h-8 bg-dark-panel border-t border-dark-accent flex items-center px-4 gap-6 text-xs">
       {/* Error message */}
       {error && (
-        <div className="flex items-center gap-2 text-red-400">
-          <AlertCircle className="w-3.5 h-3.5" />
+        <div className="flex items-center gap-2 text-red-400 flex-1" title={error}>
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
           <span className="truncate">{error}</span>
         </div>
       )}
@@ -68,8 +72,13 @@ export function StatusBar({
         </div>
       )}
 
-      {/* Disk usage */}
-      {diskInfo && (
+      {/* Disk usage or Remote indicator */}
+      {isRemote ? (
+        <div className="flex items-center gap-2 text-accent">
+          <Globe className="w-3.5 h-3.5" />
+          <span>{remoteName || 'Remote'}</span>
+        </div>
+      ) : diskInfo && (
         <div className="flex items-center gap-2">
           <div className="w-24 h-2 bg-dark-accent rounded-full overflow-hidden">
             <div

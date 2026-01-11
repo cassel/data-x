@@ -1,7 +1,7 @@
 {
   "name": "data-x-ui",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Data-X GUI - React frontend for disk analyzer",
   "author": "Cassel <c@cassel.us>",
   "license": "MIT",
@@ -15,6 +15,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@tauri-apps/plugin-fs": "^2.4.5",
     "@tauri-apps/plugin-shell": "^2.0.0",
     "d3-hierarchy": "^3.1.2",
     "d3-scale": "^4.0.2",
