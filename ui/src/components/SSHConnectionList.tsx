@@ -1,23 +1,27 @@
 import { useState } from 'react'
-import { Server, Plus, Edit, Trash2, Globe, Key, Lock, MoreVertical } from 'lucide-react'
+import { Server, Plus, Edit, Trash2, Globe, Key, Lock, MoreVertical, ChevronLeft, ChevronRight } from 'lucide-react'
 import { SSHConnection } from '../types'
 
 interface SSHConnectionListProps {
   connections: SSHConnection[]
   isLoading: boolean
+  isCollapsed: boolean
   onConnect: (connection: SSHConnection) => void
   onEdit: (connection: SSHConnection) => void
   onDelete: (connection: SSHConnection) => void
   onAddNew: () => void
+  onToggleCollapse: () => void
 }
 
 export function SSHConnectionList({
   connections,
   isLoading,
+  isCollapsed,
   onConnect,
   onEdit,
   onDelete,
   onAddNew,
+  onToggleCollapse,
 }: SSHConnectionListProps) {
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
 
@@ -55,6 +59,39 @@ export function SSHConnectionList({
     }
   }
 
+  // Collapsed view - just show icons
+  if (isCollapsed) {
+    return (
+      <div className="flex flex-col h-full items-center py-2 gap-2">
+        <button
+          onClick={onToggleCollapse}
+          className="p-2 rounded hover:bg-dark-accent transition-colors"
+          title="Expand Remote Servers"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+        <div className="w-6 h-px bg-dark-accent" />
+        <button
+          onClick={onAddNew}
+          className="p-2 rounded hover:bg-dark-accent transition-colors"
+          title="Add Connection"
+        >
+          <Plus className="w-4 h-4 text-accent" />
+        </button>
+        {connections.map((connection) => (
+          <button
+            key={connection.id}
+            onClick={() => onConnect(connection)}
+            className="p-2 rounded hover:bg-dark-accent transition-colors"
+            title={`${connection.name}\n${connection.username}@${connection.host}`}
+          >
+            <Server className="w-4 h-4 text-gray-400 hover:text-accent" />
+          </button>
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -63,13 +100,22 @@ export function SSHConnectionList({
           <Globe className="w-4 h-4 text-accent" />
           <span className="text-sm font-medium">Remote Servers</span>
         </div>
-        <button
-          onClick={onAddNew}
-          className="p-1 rounded hover:bg-dark-accent transition-colors"
-          title="Add Connection"
-        >
-          <Plus className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onAddNew}
+            className="p-1 rounded hover:bg-dark-accent transition-colors"
+            title="Add Connection"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+          <button
+            onClick={onToggleCollapse}
+            className="p-1 rounded hover:bg-dark-accent transition-colors"
+            title="Collapse"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Connection List */}

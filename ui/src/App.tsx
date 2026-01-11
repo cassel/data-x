@@ -59,6 +59,10 @@ function App() {
   const [activeConnection, setActiveConnection] = useState<SSHConnection | null>(null)
   const [sshModalOpen, setSshModalOpen] = useState(false)
   const [editingConnection, setEditingConnection] = useState<SSHConnection | null>(null)
+  const [sshSidebarCollapsed, setSshSidebarCollapsed] = useState(() => {
+    const saved = localStorage.getItem('data-x-ssh-sidebar-collapsed')
+    return saved === 'true'
+  })
 
   // Duplicate detection state
   const [duplicateModalOpen, setDuplicateModalOpen] = useState(false)
@@ -262,6 +266,14 @@ function App() {
     setSshModalOpen(true)
   }, [])
 
+  const handleSshSidebarToggle = useCallback(() => {
+    setSshSidebarCollapsed(prev => {
+      const newValue = !prev
+      localStorage.setItem('data-x-ssh-sidebar-collapsed', String(newValue))
+      return newValue
+    })
+  }, [])
+
   const handleSshSave = useCallback(async (input: any) => {
     if (editingConnection) {
       return await updateConnection({ ...input, id: editingConnection.id })
@@ -450,14 +462,16 @@ function App() {
 
       <main className="flex-1 flex overflow-hidden">
         {/* SSH Connections sidebar - FAR LEFT */}
-        <aside className="w-56 border-r border-dark-accent bg-dark-panel overflow-hidden flex flex-col flex-shrink-0">
+        <aside className={`${sshSidebarCollapsed ? 'w-12' : 'w-56'} border-r border-dark-accent bg-dark-panel overflow-hidden flex flex-col flex-shrink-0 transition-all duration-200`}>
           <SSHConnectionList
             connections={connections}
             isLoading={sshLoading}
+            isCollapsed={sshSidebarCollapsed}
             onConnect={handleSshConnect}
             onEdit={handleSshEdit}
             onDelete={handleSshDelete}
             onAddNew={handleSshAddNew}
+            onToggleCollapse={handleSshSidebarToggle}
           />
         </aside>
 
