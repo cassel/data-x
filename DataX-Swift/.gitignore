@@ -1,0 +1,27 @@
+# Xcode
+*.xcuserdata/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Build
+build/
+.build/
+Products/
+
+# SwiftPM
+.swiftpm/
+Package.resolved
+
+# macOS
+.DS_Store
+*.dSYM
+
+# Archives
+*.xcarchive
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
