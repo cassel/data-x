@@ -4,6 +4,7 @@ import SwiftUI
 final class AppState {
     var scannerViewModel = ScannerViewModel()
     var filterViewModel = FilterViewModel()
+    var sshViewModel = SSHViewModel()
     var showFolderPicker = false
     var selectedVisualization: VisualizationType = .treemap
     var lastScannedURL: URL?
