@@ -444,6 +444,21 @@ struct SidebarView: View {
                     .font(.headline)
                 Spacer()
 
+                if state.scannerViewModel.rootNode != nil {
+                    Button {
+                        state.scannerViewModel.rootNode = nil
+                        state.scannerViewModel.currentNode = nil
+                        state.scannerViewModel.navigationStack = []
+                        state.scannerViewModel.diskInfo = nil
+                        state.lastScannedURL = nil
+                        state.highlightedNode = nil
+                    } label: {
+                        Image(systemName: "house")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Back to Home")
+                }
+
                 Button {
                     state.showFolderPicker = true
                 } label: {
@@ -472,6 +487,12 @@ struct SidebarView: View {
 
             Divider()
                 .padding(.vertical, 8)
+
+            // SSH Connections section
+            SSHSidebarSection()
+
+            Divider()
+                .padding(.vertical, 4)
 
             // File Types section (only show when we have data)
             if let node = state.scannerViewModel.currentNode {
@@ -687,27 +708,123 @@ struct WelcomeView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 350)
 
-            Button {
-                appState.showFolderPicker = true
-            } label: {
-                Label("Open Folder", systemImage: "folder.badge.plus")
-                    .font(.headline)
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 14)
+            HStack(spacing: 16) {
+                Button {
+                    appState.showFolderPicker = true
+                } label: {
+                    Label("Open Folder", systemImage: "folder.badge.plus")
+                        .font(.headline)
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                Button {
+                    appState.sshViewModel.addNewConnection()
+                } label: {
+                    Label("Connect to Server", systemImage: "network")
+                        .font(.headline)
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
 
             // Keyboard shortcut hint
-            Text("⌘O")
+            Text("⌘O to open folder")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .padding(.top, -8)
+
+            // Show existing SSH connections if any
+            if !appState.sshViewModel.connections.isEmpty {
+                VStack(spacing: 8) {
+                    Text("Recent Connections")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .textCase(.uppercase)
+
+                    ForEach(appState.sshViewModel.connections.prefix(3)) { conn in
+                        HStack(spacing: 0) {
+                            // Main connection button
+                            Button {
+                                appState.sshViewModel.connect(conn, scannerVM: appState.scannerViewModel)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "network")
+                                        .foregroundColor(.accentColor)
+                                    VStack(alignment: .leading) {
+                                        Text(conn.name)
+                                            .font(.system(size: 12, weight: .medium))
+                                        Text("\(conn.username)@\(conn.host)")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: conn.authMethod.icon)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+
+                            // Edit button
+                            Button {
+                                appState.sshViewModel.editConnection(conn)
+                            } label: {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                                    .padding(8)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Edit Connection")
+                        }
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .cornerRadius(8)
+                        .contextMenu {
+                            Button {
+                                appState.sshViewModel.connect(conn, scannerVM: appState.scannerViewModel)
+                            } label: {
+                                Label("Connect & Scan", systemImage: "play.fill")
+                            }
+
+                            Button {
+                                appState.sshViewModel.editConnection(conn)
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+
+                            Divider()
+
+                            Button(role: .destructive) {
+                                appState.sshViewModel.deleteConnection(conn.id)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                        .frame(maxWidth: 300)
+                    }
+                }
+                .padding(.top, 8)
+            }
 
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .sheet(isPresented: Binding(
+            get: { appState.sshViewModel.showConnectionModal && appState.scannerViewModel.rootNode == nil },
+            set: { appState.sshViewModel.showConnectionModal = $0 }
+        )) {
+            SSHConnectionModal(existing: appState.sshViewModel.editingConnection) { conn, password in
+                appState.sshViewModel.saveConnection(conn, password: password)
+            }
+        }
     }
 }
 
