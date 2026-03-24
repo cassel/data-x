@@ -184,7 +184,7 @@ final class SSHService {
     // MARK: - Private - Remote data-x check
 
     private func checkRemoteDataX(args: [String], useSSHPass: Bool, password: String?) -> Bool {
-        let process = makeProcess(args: args, command: "which data-x 2>/dev/null || echo ''", useSSHPass: useSSHPass, password: password)
+        let process = makeProcess(args: args, command: "command -v data-x 2>/dev/null", useSSHPass: useSSHPass, password: password)
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
@@ -214,8 +214,9 @@ final class SSHService {
         currentProcess = process
 
         let pipe = Pipe()
+        let stderrPipe = Pipe()
         process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
+        process.standardError = stderrPipe
 
         do {
             try process.run()
@@ -223,7 +224,10 @@ final class SSHService {
             currentProcess = nil
 
             guard process.terminationStatus == 0 else {
-                return .failure(SSHError.scanFailed("Remote data-x scan failed"))
+                let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                let errMsg = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let detail = errMsg.isEmpty ? "exit code \(process.terminationStatus)" : errMsg
+                return .failure(SSHError.scanFailed("Remote data-x scan failed: \(detail)"))
             }
 
             let data = pipe.fileHandleForReading.readDataToEndOfFile()

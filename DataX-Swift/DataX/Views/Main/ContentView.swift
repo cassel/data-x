@@ -89,6 +89,17 @@ struct ContentView: View {
                 state.scan(directory: url)
             }
         }
+        .alert(
+            "Scan Failed",
+            isPresented: Binding(
+                get: { state.scannerViewModel.error != nil || state.sshViewModel.error != nil },
+                set: { if !$0 { state.scannerViewModel.error = nil; state.sshViewModel.error = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(state.sshViewModel.error ?? state.scannerViewModel.error?.localizedDescription ?? "Unknown error")
+        }
     }
 
     @ViewBuilder
