@@ -13,6 +13,7 @@
 		1E1B0A9034E4B89F43BB2743 /* SSHService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0800A78DED4E215E53D62A0E /* SSHService.swift */; };
 		25BDFB41A51D3B6C3C227BBB /* SSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51F9F4AEEB598CA74D43B5EA /* SSHConnection.swift */; };
 		2DAC706BBB67A62B7389958D /* SunburstView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84ECCFB4499E7CC306F81347 /* SunburstView.swift */; };
+		2FB4C9F6CDF876C8425285EF /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB3A1D91F8141053EC272B4D /* WelcomeView.swift */; };
 		30A1DB09C03CF7FAD2CDC4DA /* CirclePackingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24355B02DF6D93F7FE8E5D93 /* CirclePackingView.swift */; };
 		3236E5427A2D48D01DEEB6DB /* HeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA83C573D3FA33EA8E13213D /* HeaderView.swift */; };
 		3E735714223F773DA4176E7B /* TreemapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241CF2FC0AA6E2A4AF21C262 /* TreemapView.swift */; };
@@ -69,6 +70,7 @@
 		C25BFA1C0F554AC4F760ACA0 /* ScannerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerViewModel.swift; sourceTree = "<group>"; };
 		C2E1CE0587AA6C4BFC28A455 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		CAA924D839F29843EA003B53 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		CB3A1D91F8141053EC272B4D /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		D67061EBA6A3D2C87875DCA5 /* ColorPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorPalette.swift; sourceTree = "<group>"; };
 		DA4933A753153FC6352433FC /* SSHConnectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConnectionStore.swift; sourceTree = "<group>"; };
 		E1A2CB155009709DEEB590EC /* DataXApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataXApp.swift; sourceTree = "<group>"; };
@@ -187,6 +189,7 @@
 				C2E1CE0587AA6C4BFC28A455 /* ContentView.swift */,
 				FA83C573D3FA33EA8E13213D /* HeaderView.swift */,
 				2358E304F6FAC80B8CB40B30 /* StatusBarView.swift */,
+				CB3A1D91F8141053EC272B4D /* WelcomeView.swift */,
 			);
 			path = Main;
 			sourceTree = "<group>";
@@ -362,6 +365,7 @@
 				2DAC706BBB67A62B7389958D /* SunburstView.swift in Sources */,
 				B857C9C41A9E58B87BE5ECB6 /* TreemapLayout.swift in Sources */,
 				3E735714223F773DA4176E7B /* TreemapView.swift in Sources */,
+				2FB4C9F6CDF876C8425285EF /* WelcomeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

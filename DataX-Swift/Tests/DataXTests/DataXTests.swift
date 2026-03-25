@@ -3,9 +3,9 @@ import XCTest
 
 final class DataXTests: XCTestCase {
     func testSizeFormatter() {
-        XCTAssertEqual(SizeFormatter.format(1024), "1 KB")
-        XCTAssertEqual(SizeFormatter.format(1024 * 1024), "1 MB")
-        XCTAssertEqual(SizeFormatter.format(1024 * 1024 * 1024), "1 GB")
+        XCTAssertEqual(SizeFormatter.format(UInt64(1_000)), "1 KB")
+        XCTAssertEqual(SizeFormatter.format(UInt64(1_000_000)), "1 MB")
+        XCTAssertEqual(SizeFormatter.format(UInt64(1_000_000_000)), "1 GB")
     }
 
     func testFileCategory() {

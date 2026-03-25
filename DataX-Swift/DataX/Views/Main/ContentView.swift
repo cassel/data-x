@@ -2,92 +2,24 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
+    private let welcomeTransition = AnyTransition.opacity.combined(with: .scale(scale: 0.98))
+    private let scanTransition = AnyTransition.opacity.combined(with: .scale(scale: 1.02))
 
     var body: some View {
         @Bindable var state = appState
 
         HSplitView {
-            // Left - File Tree (always visible)
-            if state.scannerViewModel.isScanning {
-                ScanProgressView()
-                    .frame(minWidth: 280, idealWidth: 320)
-            } else if let rootNode = state.scannerViewModel.rootNode {
-                FileTreePanel(
-                    rootNode: rootNode,
-                    currentNode: state.scannerViewModel.currentNode,
-                    highlightedNode: Binding(
-                        get: { state.highlightedNode },
-                        set: { state.highlightedNode = $0 }
-                    ),
-                    onNavigate: { node in
-                        state.scannerViewModel.navigateTo(node)
-                        state.highlightedNode = nil  // Clear highlight when navigating
-                    }
-                )
-                .frame(minWidth: 280, idealWidth: 350)
-            } else {
-                WelcomeView()
-                    .frame(minWidth: 300)
-            }
-
-            // Right - Visualization + Sidebar
-            if !state.scannerViewModel.isScanning {
-                if let node = state.scannerViewModel.currentNode {
-                    HSplitView {
-                        // Visualization
-                        VStack(spacing: 0) {
-                            // Visualization header
-                            HStack {
-                                Image(systemName: state.selectedVisualization.icon)
-                                    .foregroundColor(.accentColor)
-                                Text(state.selectedVisualization.rawValue)
-                                    .font(.headline)
-
-                                Spacer()
-
-                                // Breadcrumb for current folder
-                                HStack(spacing: 4) {
-                                    Image(systemName: "folder.fill")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text(node.name)
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(Color(nsColor: .controlBackgroundColor))
-
-                            Divider()
-
-                            // Visualization content
-                            mainVisualization(node: node)
-
-                            Divider()
-
-                            // Status bar
-                            StatusBarView()
-                        }
-                        .frame(minWidth: 400)
-
-                        // Right Sidebar - Visualizations & Stats
-                        SidebarView()
-                            .frame(minWidth: 180, idealWidth: 220, maxWidth: 280)
-                    }
-                }
-            }
+            leftPane(state: state)
+            rightPane(state: state)
         }
+        .animation(.easeInOut(duration: 0.3), value: state.scannerViewModel.isScanning)
+        .animation(.easeInOut(duration: 0.3), value: state.scannerViewModel.rootNode != nil)
         .fileImporter(
             isPresented: $state.showFolderPicker,
             allowedContentTypes: [.folder],
             allowsMultipleSelection: false
         ) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                _ = url.startAccessingSecurityScopedResource()
-                state.scan(directory: url)
-            }
+            state.handleFolderImport(result)
         }
         .alert(
             "Scan Failed",
@@ -99,6 +31,85 @@ struct ContentView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(state.sshViewModel.error ?? state.scannerViewModel.error?.localizedDescription ?? "Unknown error")
+        }
+    }
+
+    @ViewBuilder
+    private func leftPane(state: AppState) -> some View {
+        if state.scannerViewModel.isScanning {
+            ScanProgressView()
+                .frame(minWidth: 280, idealWidth: 320)
+                .transition(scanTransition)
+        } else if let rootNode = state.scannerViewModel.rootNode {
+            FileTreePanel(
+                rootNode: rootNode,
+                currentNode: state.scannerViewModel.currentNode,
+                highlightedNode: Binding(
+                    get: { state.highlightedNode },
+                    set: { state.highlightedNode = $0 }
+                ),
+                onNavigate: { node in
+                    state.scannerViewModel.navigateTo(node)
+                    state.highlightedNode = nil  // Clear highlight when navigating
+                }
+            )
+            .frame(minWidth: 280, idealWidth: 350)
+            .transition(.opacity)
+        } else {
+            WelcomeView()
+                .frame(minWidth: 300)
+                .transition(welcomeTransition)
+        }
+    }
+
+    @ViewBuilder
+    private func rightPane(state: AppState) -> some View {
+        if !state.scannerViewModel.isScanning,
+           let node = state.scannerViewModel.currentNode {
+            HSplitView {
+                // Visualization
+                VStack(spacing: 0) {
+                    // Visualization header
+                    HStack {
+                        Image(systemName: state.selectedVisualization.icon)
+                            .foregroundColor(.accentColor)
+                        Text(state.selectedVisualization.rawValue)
+                            .font(.headline)
+
+                        Spacer()
+
+                        // Breadcrumb for current folder
+                        HStack(spacing: 4) {
+                            Image(systemName: "folder.fill")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(node.name)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color(nsColor: .controlBackgroundColor))
+
+                    Divider()
+
+                    // Visualization content
+                    mainVisualization(node: node)
+
+                    Divider()
+
+                    // Status bar
+                    StatusBarView()
+                }
+                .frame(minWidth: 400)
+
+                // Right Sidebar - Visualizations & Stats
+                SidebarView()
+                    .frame(minWidth: 180, idealWidth: 220, maxWidth: 280)
+            }
+            .transition(.move(edge: .trailing).combined(with: .opacity))
         }
     }
 
@@ -674,168 +685,6 @@ struct CategoryStatRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
-    }
-}
-
-// MARK: - Welcome View
-
-struct WelcomeView: View {
-    @Environment(AppState.self) private var appState
-
-    var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
-
-            // App icon
-            ZStack {
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.accentColor, Color.accentColor.opacity(0.6)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 100, height: 100)
-
-                Image(systemName: "chart.pie.fill")
-                    .font(.system(size: 44))
-                    .foregroundColor(.white)
-            }
-
-            VStack(spacing: 8) {
-                Text("Data-X")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-
-                Text("Disk Space Analyzer")
-                    .font(.title3)
-                    .foregroundColor(.secondary)
-            }
-
-            Text("Visualize disk usage and find what's taking up space")
-                .font(.body)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 350)
-
-            HStack(spacing: 16) {
-                Button {
-                    appState.showFolderPicker = true
-                } label: {
-                    Label("Open Folder", systemImage: "folder.badge.plus")
-                        .font(.headline)
-                        .padding(.horizontal, 28)
-                        .padding(.vertical, 14)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-
-                Button {
-                    appState.sshViewModel.addNewConnection()
-                } label: {
-                    Label("Connect to Server", systemImage: "network")
-                        .font(.headline)
-                        .padding(.horizontal, 28)
-                        .padding(.vertical, 14)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-            }
-
-            // Keyboard shortcut hint
-            Text("⌘O to open folder")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.top, -8)
-
-            // Show existing SSH connections if any
-            if !appState.sshViewModel.connections.isEmpty {
-                VStack(spacing: 8) {
-                    Text("Recent Connections")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .textCase(.uppercase)
-
-                    ForEach(appState.sshViewModel.connections.prefix(3)) { conn in
-                        HStack(spacing: 0) {
-                            // Main connection button
-                            Button {
-                                appState.sshViewModel.connect(conn, scannerVM: appState.scannerViewModel)
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "network")
-                                        .foregroundColor(.accentColor)
-                                    VStack(alignment: .leading) {
-                                        Text(conn.name)
-                                            .font(.system(size: 12, weight: .medium))
-                                        Text("\(conn.username)@\(conn.host)")
-                                            .font(.system(size: 10))
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    Image(systemName: conn.authMethod.icon)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                            }
-                            .buttonStyle(.plain)
-
-                            // Edit button
-                            Button {
-                                appState.sshViewModel.editConnection(conn)
-                            } label: {
-                                Image(systemName: "pencil")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
-                                    .padding(8)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Edit Connection")
-                        }
-                        .background(Color(nsColor: .controlBackgroundColor))
-                        .cornerRadius(8)
-                        .contextMenu {
-                            Button {
-                                appState.sshViewModel.connect(conn, scannerVM: appState.scannerViewModel)
-                            } label: {
-                                Label("Connect & Scan", systemImage: "play.fill")
-                            }
-
-                            Button {
-                                appState.sshViewModel.editConnection(conn)
-                            } label: {
-                                Label("Edit", systemImage: "pencil")
-                            }
-
-                            Divider()
-
-                            Button(role: .destructive) {
-                                appState.sshViewModel.deleteConnection(conn.id)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
-                        .frame(maxWidth: 300)
-                    }
-                }
-                .padding(.top, 8)
-            }
-
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .sheet(isPresented: Binding(
-            get: { appState.sshViewModel.showConnectionModal && appState.scannerViewModel.rootNode == nil },
-            set: { appState.sshViewModel.showConnectionModal = $0 }
-        )) {
-            SSHConnectionModal(existing: appState.sshViewModel.editingConnection) { conn, password in
-                appState.sshViewModel.saveConnection(conn, password: password)
-            }
-        }
     }
 }
 

@@ -20,6 +20,18 @@ final class SSHViewModel {
 
     private let sshService = SSHService()
 
+    static func sortedWelcomeConnections(_ connections: [SSHConnection], limit: Int = 3) -> [SSHConnection] {
+        Array(
+            connections
+                .sorted(by: welcomeConnectionSort)
+                .prefix(limit)
+        )
+    }
+
+    var welcomeScreenRecentConnections: [SSHConnection] {
+        Self.sortedWelcomeConnections(connections)
+    }
+
     // MARK: - Init
 
     init() {
@@ -94,6 +106,7 @@ final class SSHViewModel {
 
                 switch result {
                 case .success(let root):
+                    self?.loadConnections()
                     scannerVM.rootNode = root
                     scannerVM.currentNode = root
                     scannerVM.navigationStack = [root]
@@ -129,5 +142,16 @@ final class SSHViewModel {
     func editConnection(_ connection: SSHConnection) {
         editingConnection = connection
         showConnectionModal = true
+    }
+
+    private static func welcomeConnectionSort(_ lhs: SSHConnection, _ rhs: SSHConnection) -> Bool {
+        let lhsRecency = lhs.lastUsedAt ?? lhs.createdAt
+        let rhsRecency = rhs.lastUsedAt ?? rhs.createdAt
+
+        if lhsRecency != rhsRecency {
+            return lhsRecency > rhsRecency
+        }
+
+        return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
     }
 }
