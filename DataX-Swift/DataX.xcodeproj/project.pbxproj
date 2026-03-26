@@ -11,6 +11,7 @@
 		5D4C3B2A1908171615141312 /* DuplicateDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D4C3B2A1908171615141313 /* DuplicateDetector.swift */; };
 		6E5D4C3B2A190817161514131 /* DuplicateCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E5D4C3B2A190817161514132 /* DuplicateCard.swift */; };
 		0F1A2B3C4D5E6F708192A3B4 /* FileTypeLegendOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F3A4B5C6D7E8F901A2B3C4D /* FileTypeLegendOverlay.swift */; };
+		A8F19D6A1B2C3D4E5F607182 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8F19D6A1B2C3D4E5F607183 /* MenuBarView.swift */; };
 		13899A7093E8F6E52DE3BC95 /* FileNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D1C9374C17D1CECE12A62D8 /* FileNode.swift */; };
 		1E1B0A9034E4B89F43BB2743 /* SSHService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0800A78DED4E215E53D62A0E /* SSHService.swift */; };
 		1F2A3B4C5D6E7F8091A2B3C4 /* SSHToolbarPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F4A5B6C7D8E9F001A2B3C4D /* SSHToolbarPopover.swift */; };
@@ -62,6 +63,7 @@
 		2C25ABF65EFC9AAE076DA6BD /* ScanProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanProgress.swift; sourceTree = "<group>"; };
 		74B1E6C3D94A4F6F8E2C1B7A /* ScanEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanEvent.swift; sourceTree = "<group>"; };
 		2F3A4B5C6D7E8F901A2B3C4D /* FileTypeLegendOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTypeLegendOverlay.swift; sourceTree = "<group>"; };
+		A8F19D6A1B2C3D4E5F607183 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
 		36747BF62C4E860F714CF69F /* SSHSidebarSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHSidebarSection.swift; sourceTree = "<group>"; };
 		5D4C3B2A1908171615141313 /* DuplicateDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateDetector.swift; sourceTree = "<group>"; };
 		6E5D4C3B2A190817161514132 /* DuplicateCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateCard.swift; sourceTree = "<group>"; };
@@ -217,6 +219,7 @@
 				C2E1CE0587AA6C4BFC28A455 /* ContentView.swift */,
 				FA83C573D3FA33EA8E13213D /* HeaderView.swift */,
 				B6F4E9D1023A4B5C6D7E8F91 /* HistoryPanel.swift */,
+				A8F19D6A1B2C3D4E5F607183 /* MenuBarView.swift */,
 				2358E304F6FAC80B8CB40B30 /* StatusBarView.swift */,
 				A6C301B36D104F4490F5C2D1 /* TrendSparkline.swift */,
 				CB3A1D91F8141053EC272B4D /* WelcomeView.swift */,
@@ -384,6 +387,7 @@
 				3236E5427A2D48D01DEEB6DB /* HeaderView.swift in Sources */,
 				B6F4E9D1023A4B5C6D7E8F90 /* HistoryPanel.swift in Sources */,
 				A1B2C3D4E5F60718293A4B5C /* InsightsPopover.swift in Sources */,
+				A8F19D6A1B2C3D4E5F607182 /* MenuBarView.swift in Sources */,
 				25BDFB41A51D3B6C3C227BBB /* SSHConnection.swift in Sources */,
 				9DEAA80264B7F320DA27530C /* SSHConnectionModal.swift in Sources */,
 				4214395CD92041668DC46797 /* SSHConnectionStore.swift in Sources */,

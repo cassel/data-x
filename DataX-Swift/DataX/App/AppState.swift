@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum FolderIntake {
@@ -23,6 +24,8 @@ enum FolderIntake {
 @MainActor
 @Observable
 final class AppState {
+    static let mainWindowID = "main"
+
     var scannerViewModel = ScannerViewModel()
     var filterViewModel = FilterViewModel()
     var sshViewModel = SSHViewModel()
@@ -58,6 +61,19 @@ final class AppState {
     func refresh() {
         guard let url = lastScannedURL else { return }
         scannerViewModel.scan(directory: url)
+    }
+
+    func scanNowFromMenuBar(openWindow: OpenWindowAction) {
+        openWindow(id: Self.mainWindowID)
+        NSApp.activate(ignoringOtherApps: true)
+
+        switch MenuBarScanNowIntent.resolve(lastScannedURL: lastScannedURL) {
+        case .rescan(let url):
+            showFolderPicker = false
+            scan(directory: url)
+        case .openFolderPicker:
+            showFolderPicker = true
+        }
     }
 
     func selectVisualizationFromCommand(_ visualization: VisualizationType) {

@@ -84,32 +84,16 @@ struct StatusBarView: View {
 
             // Usage bar
             HStack(spacing: 8) {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.secondary.opacity(0.2))
-                            .frame(height: 4)
-
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(usageColor(diskInfo.usedPercentage))
-                            .frame(width: max(0, geometry.size.width * diskInfo.usedPercentage / 100), height: 4)
-                    }
-                }
+                DiskUsageBar(
+                    percentage: diskInfo.usedPercentage,
+                    height: 4,
+                    cornerRadius: 2
+                )
                 .frame(width: 60, height: 4)
 
                 Text("\(diskInfo.formattedFree) free of \(diskInfo.formattedTotal)")
                     .foregroundColor(.secondary)
             }
-        }
-    }
-
-    private func usageColor(_ percentage: Double) -> Color {
-        if percentage > 90 {
-            return .red
-        } else if percentage > 75 {
-            return .orange
-        } else {
-            return .accentColor
         }
     }
 }

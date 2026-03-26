@@ -6,7 +6,7 @@ struct DataXApp: App {
     @State private var appState = AppState()
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: AppState.mainWindowID) {
             ContentView()
                 .environment(appState)
                 .frame(minWidth: 900, minHeight: 600)
@@ -59,6 +59,15 @@ struct DataXApp: App {
                 }
             }
         }
+
+        MenuBarExtra {
+            MenuBarView()
+                .environment(appState)
+        } label: {
+            MenuBarExtraLabelView()
+                .environment(appState)
+        }
+        .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView()
