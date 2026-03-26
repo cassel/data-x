@@ -11,7 +11,7 @@ struct TreemapView: View {
     let onCommitMoveToTrash: (FileNode) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
-    @State private var cachedRects: [TreemapRect] = []
+    @State private var hitTestCache = TreemapHitTestCache.empty
     @State private var hoveredNode: FileNode?
     @State private var lastMouseLocation: CGPoint?
     @State private var lastUpdateTime: Date = .distantPast
@@ -30,13 +30,17 @@ struct TreemapView: View {
     private let pulseScaleMax: CGFloat = 1.02
     private let pulseAnimation = Animation.easeInOut(duration: 2).repeatForever(autoreverses: true)
 
+    private var cachedRects: [TreemapRect] {
+        hitTestCache.rects
+    }
+
     // Combined: hover takes priority, otherwise use highlighted from tree
     private var effectiveHighlight: FileNode? {
         let candidate = hoveredNode ?? highlightedNode
 
         guard let candidate,
               !isAnimatingRemoval(for: candidate),
-              activeRects().contains(where: { $0.id == candidate.id }) else {
+              activeRect(for: candidate.id) != nil else {
             return nil
         }
 
@@ -211,15 +215,16 @@ struct TreemapView: View {
         lastViewSize = size
 
         let newRects = layoutRects(for: node, size: size)
+        let newHitTestCache = makeHitTestCache(rects: newRects, size: size)
         let sourceRects = activeRects()
 
         guard !hasSameLayout(sourceRects, newRects) else {
-            cachedRects = newRects
+            applyHitTestCache(newHitTestCache)
             layoutAnimation = nil
             return
         }
 
-        cachedRects = newRects
+        applyHitTestCache(newHitTestCache)
 
         if sourceRects.isEmpty && newRects.isEmpty {
             layoutAnimation = nil
@@ -241,16 +246,46 @@ struct TreemapView: View {
         )
     }
 
-    private func findHoveredNode(at point: CGPoint) -> FileNode? {
-        var deepest: TreemapRect?
-        for rect in activeRects() {
-            if rect.contains(point) {
-                if deepest == nil || rect.depth > deepest!.depth {
-                    deepest = rect
-                }
-            }
+    private func makeHitTestCache(rects: [TreemapRect], size: CGSize) -> TreemapHitTestCache {
+        TreemapHitTestCache(
+            rects: rects,
+            bounds: CGRect(origin: .zero, size: size)
+        )
+    }
+
+    private func applyHitTestCache(_ cache: TreemapHitTestCache) {
+        hitTestCache = cache
+
+        if let hoveredNode, cache.rect(for: hoveredNode.id) == nil {
+            self.hoveredNode = nil
         }
-        return deepest?.node
+    }
+
+    private func findHoveredNode(at point: CGPoint) -> FileNode? {
+        if let layoutAnimation {
+            let activeDate = Date()
+            guard let motionIndex = layoutAnimation.hitTestIndex else { return nil }
+
+            var candidateRectsByID: [UUID: TreemapRect] = [:]
+            var candidates: [TreemapHitTestEntry] = []
+
+            for candidate in motionIndex.candidates(at: point) {
+                guard let rect = renderedRect(for: candidate.id, in: layoutAnimation, at: activeDate) else {
+                    continue
+                }
+
+                candidateRectsByID[rect.id] = rect
+                candidates.append(TreemapHitTestEntry(rect: rect))
+            }
+
+            guard let resolved = TreemapHoverResolver.resolve(point: point, candidates: candidates) else {
+                return nil
+            }
+
+            return candidateRectsByID[resolved.id]?.node
+        }
+
+        return hitTestCache.hoveredRect(at: point)?.node
     }
 
     // MARK: - Static Drawing
@@ -377,7 +412,7 @@ struct TreemapView: View {
         guard let highlighted = effectiveHighlight else { return }
 
         let activeRects = activeRects(at: date)
-        guard let highlightedRect = activeRects.first(where: { $0.id == highlighted.id }) else { return }
+        guard let highlightedRect = activeRect(for: highlighted.id, at: date) else { return }
 
         var context = context
         applyZoomTransform(to: &context, size: size)
@@ -404,6 +439,20 @@ struct TreemapView: View {
         context.stroke(highlightedPath, with: .color(borderColor), lineWidth: 2)
     }
 
+    private func activeRect(for id: UUID, at date: Date? = nil) -> TreemapRect? {
+        let activeDate = date ?? .now
+
+        if let deletionAnimation {
+            return renderedRect(for: id, in: deletionAnimation, at: activeDate)
+        }
+
+        if let layoutAnimation {
+            return renderedRect(for: id, in: layoutAnimation, at: activeDate)
+        }
+
+        return hitTestCache.rect(for: id)
+    }
+
     private func activeRects(at date: Date? = nil) -> [TreemapRect] {
         if let deletionAnimation {
             return renderedRects(for: deletionAnimation, at: date ?? .now).map(\.rect)
@@ -414,6 +463,64 @@ struct TreemapView: View {
         }
 
         return cachedRects
+    }
+
+    private func renderedRect(
+        for id: UUID,
+        in animation: TreemapDeletionAnimation,
+        at date: Date
+    ) -> TreemapRect? {
+        let deletedProgress = animation.motion.deletedRectProgress(at: date.timeIntervalSince(animation.startedAt))
+        let survivingProgress = animation.motion.survivingRectProgress(at: date.timeIntervalSince(animation.startedAt))
+
+        if let sourceRect = animation.sourceRectsByID[id] {
+            if animation.deletedNodeIDs.contains(sourceRect.id) {
+                let collapseCenter = sourceRect.id == animation.targetRect.id
+                    ? sourceRect.center
+                    : animation.targetRect.center
+                return collapse(rect: sourceRect, toward: collapseCenter, progress: deletedProgress)
+            }
+
+            if let destinationRect = animation.destinationRectsByID[sourceRect.id] {
+                return interpolate(from: sourceRect, to: destinationRect, progress: survivingProgress)
+            }
+
+            return collapse(rect: sourceRect, toward: sourceRect.center, progress: deletedProgress)
+        }
+
+        guard let destinationRect = animation.destinationRectsByID[id] else { return nil }
+        guard !animation.sourceRectIDs.contains(id) else { return nil }
+
+        return interpolate(
+            from: collapsedRect(for: destinationRect, around: animation.targetRect.center),
+            to: destinationRect,
+            progress: survivingProgress
+        )
+    }
+
+    private func renderedRect(
+        for id: UUID,
+        in animation: TreemapLayoutAnimation,
+        at date: Date
+    ) -> TreemapRect? {
+        let progress = animation.motion.progress(at: date.timeIntervalSince(animation.startedAt))
+
+        if let sourceRect = animation.sourceRectsByID[id] {
+            if let destinationRect = animation.destinationRectsByID[sourceRect.id] {
+                return interpolate(from: sourceRect, to: destinationRect, progress: progress)
+            }
+
+            return collapse(rect: sourceRect, toward: sourceRect.center, progress: progress)
+        }
+
+        guard let destinationRect = animation.destinationRectsByID[id] else { return nil }
+        guard !animation.sourceRectIDs.contains(id) else { return nil }
+
+        return interpolate(
+            from: collapsedRect(for: destinationRect, around: destinationRect.center),
+            to: destinationRect,
+            progress: progress
+        )
     }
 
     private func renderedRects(for animation: TreemapDeletionAnimation, at date: Date) -> [RenderedTreemapRect] {
@@ -580,7 +687,7 @@ struct TreemapView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + animation.motion.duration) {
             guard layoutAnimation?.token == animation.token else { return }
 
-            cachedRects = animation.destinationRects
+            applyHitTestCache(makeHitTestCache(rects: animation.destinationRects, size: lastViewSize))
             layoutAnimation = nil
             refreshHoveredNode(in: lastViewSize)
         }
@@ -724,7 +831,7 @@ struct TreemapView: View {
     }
 
     private func makeDeletionAnimation(for target: FileNode, in viewSize: CGSize) -> TreemapDeletionAnimation? {
-        guard let targetRect = cachedRects.first(where: { $0.id == target.id }) else { return nil }
+        guard let targetRect = hitTestCache.rect(for: target.id) else { return nil }
         guard let previewNode = node.clonedSubtree(removingNodeWithID: target.id) else { return nil }
 
         return TreemapDeletionAnimation(
@@ -740,7 +847,7 @@ struct TreemapView: View {
     private func scheduleDeletionCommit(for animation: TreemapDeletionAnimation) {
         DispatchQueue.main.asyncAfter(deadline: .now() + animation.motion.totalDuration) {
             if deletionAnimation?.token == animation.token {
-                cachedRects = animation.destinationRects
+                applyHitTestCache(makeHitTestCache(rects: animation.destinationRects, size: lastViewSize))
                 deletionAnimation = nil
                 hoveredNode = nil
                 lastMouseLocation = nil
@@ -810,6 +917,7 @@ private struct TreemapDeletionAnimation {
     let targetNode: FileNode
     let targetRect: TreemapRect
     let sourceRects: [TreemapRect]
+    let sourceRectsByID: [UUID: TreemapRect]
     let sourceRectIDs: Set<UUID>
     let destinationRects: [TreemapRect]
     let destinationRectsByID: [UUID: TreemapRect]
@@ -828,6 +936,7 @@ private struct TreemapDeletionAnimation {
         self.targetNode = targetNode
         self.targetRect = targetRect
         self.sourceRects = sourceRects
+        self.sourceRectsByID = Dictionary(uniqueKeysWithValues: sourceRects.map { ($0.id, $0) })
         self.sourceRectIDs = Set(sourceRects.map(\.id))
         self.destinationRects = destinationRects
         self.destinationRectsByID = Dictionary(uniqueKeysWithValues: destinationRects.map { ($0.id, $0) })
@@ -840,9 +949,11 @@ private struct TreemapDeletionAnimation {
 private struct TreemapLayoutAnimation {
     let token = UUID()
     let sourceRects: [TreemapRect]
+    let sourceRectsByID: [UUID: TreemapRect]
     let sourceRectIDs: Set<UUID>
     let destinationRects: [TreemapRect]
     let destinationRectsByID: [UUID: TreemapRect]
+    let hitTestIndex: TreemapSpatialIndex?
     let startedAt: Date
     let motion: TreemapLayoutMotionPolicy
 
@@ -853,11 +964,74 @@ private struct TreemapLayoutAnimation {
         reduceMotion: Bool
     ) {
         self.sourceRects = sourceRects
+        self.sourceRectsByID = Dictionary(uniqueKeysWithValues: sourceRects.map { ($0.id, $0) })
         self.sourceRectIDs = Set(sourceRects.map(\.id))
         self.destinationRects = destinationRects
         self.destinationRectsByID = Dictionary(uniqueKeysWithValues: destinationRects.map { ($0.id, $0) })
+        self.hitTestIndex = TreemapLayoutAnimation.makeHitTestIndex(
+            sourceRects: sourceRects,
+            destinationRects: destinationRects
+        )
         self.startedAt = startedAt
         self.motion = TreemapLayoutMotionPolicy(reduceMotion: reduceMotion)
+    }
+
+    private static func makeHitTestIndex(
+        sourceRects: [TreemapRect],
+        destinationRects: [TreemapRect]
+    ) -> TreemapSpatialIndex? {
+        let sourceRectsByID = Dictionary(uniqueKeysWithValues: sourceRects.map { ($0.id, $0) })
+        let destinationRectsByID = Dictionary(uniqueKeysWithValues: destinationRects.map { ($0.id, $0) })
+        let allIDs = Set(sourceRectsByID.keys).union(destinationRectsByID.keys)
+
+        var entries: [TreemapHitTestEntry] = []
+        entries.reserveCapacity(allIDs.count)
+
+        var bounds = CGRect.null
+
+        for id in allIDs {
+            guard let entry = motionEnvelopeEntry(
+                source: sourceRectsByID[id],
+                destination: destinationRectsByID[id]
+            ) else {
+                continue
+            }
+
+            guard entry.isIndexable else { continue }
+
+            bounds = bounds.isNull ? entry.rect : bounds.union(entry.rect)
+            entries.append(entry)
+        }
+
+        guard !entries.isEmpty, !bounds.isNull else { return nil }
+
+        var index = TreemapSpatialIndex(bounds: bounds)
+        for entry in entries {
+            index.insert(entry)
+        }
+
+        return index
+    }
+
+    private static func motionEnvelopeEntry(
+        source: TreemapRect?,
+        destination: TreemapRect?
+    ) -> TreemapHitTestEntry? {
+        switch (source, destination) {
+        case let (.some(sourceRect), .some(destinationRect)):
+            let envelope = sourceRect.cgRect.union(destinationRect.cgRect)
+            return TreemapHitTestEntry(
+                id: destinationRect.id,
+                rect: envelope,
+                depth: max(sourceRect.depth, destinationRect.depth)
+            )
+        case let (.some(sourceRect), .none):
+            return TreemapHitTestEntry(rect: sourceRect)
+        case let (.none, .some(destinationRect)):
+            return TreemapHitTestEntry(rect: destinationRect)
+        case (.none, .none):
+            return nil
+        }
     }
 }
 

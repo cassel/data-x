@@ -31,6 +31,7 @@
 		9762A6933EEC94ECCD5D688C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E1CE0587AA6C4BFC28A455 /* ContentView.swift */; };
 		9DEAA80264B7F320DA27530C /* SSHConnectionModal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4C91991DAB418A6E1227B37 /* SSHConnectionModal.swift */; };
 		A7E959C1CF10F7F7838BF920 /* FileCategory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FF7262ECBECD09DD652AA8 /* FileCategory.swift */; };
+		A13F9E5C7B284C91B4D0E6F1 /* TreemapSpatialIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6E2F4901A7B4C3D9E8F2056 /* TreemapSpatialIndex.swift */; };
 		B12489498EFF405260FFB0F3 /* ColorPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = D67061EBA6A3D2C87875DCA5 /* ColorPalette.swift */; };
 		B79C43F4CDB36E562C44C555 /* SSHViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42F65EE890E79E0D42024F00 /* SSHViewModel.swift */; };
 		B827BB58CCF0A3722A9B5C13 /* SSHSidebarSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36747BF62C4E860F714CF69F /* SSHSidebarSection.swift */; };
@@ -73,6 +74,7 @@
 		B46F587C76B467E3E39FB989 /* DiskInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskInfo.swift; sourceTree = "<group>"; };
 		B9FF7262ECBECD09DD652AA8 /* FileCategory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileCategory.swift; sourceTree = "<group>"; };
 		BEC0AC2866E75A8867DC132C /* FilterViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterViewModel.swift; sourceTree = "<group>"; };
+		C6E2F4901A7B4C3D9E8F2056 /* TreemapSpatialIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreemapSpatialIndex.swift; sourceTree = "<group>"; };
 		C25BFA1C0F554AC4F760ACA0 /* ScannerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerViewModel.swift; sourceTree = "<group>"; };
 		C2E1CE0587AA6C4BFC28A455 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		CAA924D839F29843EA003B53 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -251,6 +253,7 @@
 				D67061EBA6A3D2C87875DCA5 /* ColorPalette.swift */,
 				EC70483222164363921D74FD /* SizeFormatter.swift */,
 				0230A55006976CBF758670A3 /* TreemapLayout.swift */,
+				C6E2F4901A7B4C3D9E8F2056 /* TreemapSpatialIndex.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -384,6 +387,7 @@
 				6F5BE60B9B2AF9345CE7DF28 /* StatusBarView.swift in Sources */,
 				2DAC706BBB67A62B7389958D /* SunburstView.swift in Sources */,
 				B857C9C41A9E58B87BE5ECB6 /* TreemapLayout.swift in Sources */,
+				A13F9E5C7B284C91B4D0E6F1 /* TreemapSpatialIndex.swift in Sources */,
 				3E735714223F773DA4176E7B /* TreemapView.swift in Sources */,
 				2FB4C9F6CDF876C8425285EF /* WelcomeView.swift in Sources */,
 			);
