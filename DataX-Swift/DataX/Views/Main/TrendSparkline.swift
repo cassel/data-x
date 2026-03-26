@@ -1,6 +1,37 @@
 import Charts
 import SwiftUI
 
+enum ScanHistoryMath {
+    static func deltaBytes(current: UInt64, previous: UInt64) -> Int64 {
+        if current >= previous {
+            return Int64(min(current - previous, UInt64(Int64.max)))
+        }
+
+        return -Int64(min(previous - current, UInt64(Int64.max)))
+    }
+
+    static func formattedSignedDelta(_ deltaBytes: Int64?) -> String {
+        guard let deltaBytes else { return "No previous scan" }
+
+        let sign = switch deltaBytes {
+        case let value where value > 0:
+            "+"
+        case let value where value < 0:
+            "-"
+        default:
+            ""
+        }
+
+        let magnitudeText = if deltaBytes == 0 {
+            "0 bytes"
+        } else {
+            SizeFormatter.format(deltaBytes.magnitude)
+        }
+
+        return "\(sign)\(magnitudeText)"
+    }
+}
+
 enum ScanTrendDirection: Equatable {
     case growth
     case reduction
@@ -32,22 +63,7 @@ struct ScanTrendSummary {
     }
 
     var formattedDeltaText: String {
-        let sign = switch deltaDirection {
-        case .growth:
-            "+"
-        case .reduction:
-            "-"
-        case .neutral:
-            ""
-        }
-
-        let magnitudeText = if deltaBytes == 0 {
-            "0 bytes"
-        } else {
-            SizeFormatter.format(deltaBytes.magnitude)
-        }
-
-        return "\(sign)\(magnitudeText) since last scan"
+        "\(ScanHistoryMath.formattedSignedDelta(deltaBytes)) since last scan"
     }
 
     var accessibilityValue: String {
@@ -92,11 +108,7 @@ enum ScanTrendSummaryBuilder {
         let previous = newestTwo[0].totalSize
         let newest = newestTwo[1].totalSize
 
-        if newest >= previous {
-            return Int64(min(newest - previous, UInt64(Int64.max)))
-        }
-
-        return -Int64(min(previous - newest, UInt64(Int64.max)))
+        return ScanHistoryMath.deltaBytes(current: newest, previous: previous)
     }
 
     static func summary(

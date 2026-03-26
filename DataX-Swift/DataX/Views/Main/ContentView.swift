@@ -188,8 +188,12 @@ struct ContentView: View {
             )
         }
         .animation(motionPolicy.phaseAnimation, value: contentPhase)
+        .animation(.spring(duration: 0.25), value: state.scannerViewModel.growthAlertBanner?.id)
         .toolbar {
             scannedToolbar(state: state, contentPhase: contentPhase)
+        }
+        .sheet(isPresented: $state.showHistoryPanel) {
+            HistoryPanel()
         }
         .fileImporter(
             isPresented: $state.showFolderPicker,
@@ -203,6 +207,17 @@ struct ContentView: View {
         }
         .onChange(of: state.scannerViewModel.rootNode?.id) { _, _ in
             isLegendVisible = false
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let bannerState = state.scannerViewModel.growthAlertBanner {
+                GrowthAlertBannerView(state: bannerState) {
+                    state.scannerViewModel.dismissGrowthAlert()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .confirmationDialog(
             "Move to Trash?",
@@ -570,6 +585,53 @@ struct ContentView: View {
         }
 
         appState.highlightedNode = nil
+    }
+}
+
+private struct GrowthAlertBannerView: View {
+    let state: GrowthAlertBannerState
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "arrow.up.right.circle.fill")
+                .foregroundStyle(.red)
+                .font(.title3)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(state.path)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Text("grew \(state.formattedGrowthText) since \(state.previousScanDate.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            Button {
+                onDismiss()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.thinMaterial)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.red.opacity(0.2), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(state.message)
     }
 }
 

@@ -27,6 +27,7 @@ final class AppState {
     var filterViewModel = FilterViewModel()
     var sshViewModel = SSHViewModel()
     var showFolderPicker = false
+    var showHistoryPanel = false
     var selectedVisualization: VisualizationType = .treemap
     var lastScannedURL: URL?
     var highlightedNode: FileNode?  // Selected in tree, highlighted in treemap (not navigated)

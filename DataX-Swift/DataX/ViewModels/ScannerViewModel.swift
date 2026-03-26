@@ -202,6 +202,74 @@ private enum TrashUndoWarning: LocalizedError {
     }
 }
 
+struct GrowthAlertBannerState: Equatable, Identifiable {
+    let path: String
+    let growthBytes: Int64
+    let previousScanDate: Date
+
+    var id: String {
+        "\(path)-\(previousScanDate.timeIntervalSinceReferenceDate)-\(growthBytes)"
+    }
+
+    var formattedGrowthText: String {
+        SizeFormatter.format(UInt64(growthBytes))
+    }
+
+    var message: String {
+        "\(path) grew \(formattedGrowthText) since \(previousScanDate.formatted(date: .abbreviated, time: .omitted))"
+    }
+}
+
+enum ScanGrowthAlertEvaluator {
+    static let absoluteGrowthThresholdBytes: UInt64 = 5_000_000_000
+    private static let percentageGrowthThreshold = 0.2
+
+    static func growthAlertState(from recentRecords: [ScanRecord]) -> GrowthAlertBannerState? {
+        guard recentRecords.count >= 2 else { return nil }
+
+        let sortedRecords = recentRecords.sorted(by: newestFirst)
+        let current = sortedRecords[0]
+        let previous = sortedRecords[1]
+
+        guard current.rootPath == previous.rootPath else { return nil }
+
+        let deltaBytes = ScanHistoryMath.deltaBytes(
+            current: current.totalSize,
+            previous: previous.totalSize
+        )
+
+        guard deltaBytes > 0 else { return nil }
+
+        let positiveGrowthBytes = UInt64(deltaBytes)
+        let exceedsAbsoluteThreshold = positiveGrowthBytes > absoluteGrowthThresholdBytes
+        let exceedsPercentageThreshold = if previous.totalSize == 0 {
+            false
+        } else {
+            Double(positiveGrowthBytes) / Double(previous.totalSize) > percentageGrowthThreshold
+        }
+
+        guard exceedsAbsoluteThreshold || exceedsPercentageThreshold else { return nil }
+
+        return GrowthAlertBannerState(
+            path: current.rootPath,
+            growthBytes: deltaBytes,
+            previousScanDate: previous.timestamp
+        )
+    }
+
+    private static func newestFirst(_ lhs: ScanRecord, _ rhs: ScanRecord) -> Bool {
+        if lhs.timestamp != rhs.timestamp {
+            return lhs.timestamp > rhs.timestamp
+        }
+
+        if lhs.totalSize != rhs.totalSize {
+            return lhs.totalSize > rhs.totalSize
+        }
+
+        return lhs.fileCount > rhs.fileCount
+    }
+}
+
 @MainActor
 @Observable
 final class ScannerViewModel {
@@ -226,6 +294,7 @@ final class ScannerViewModel {
     var diskInfo: DiskInfo?
     var error: Error?
     var errorAlertTitle = "Scan Failed"
+    var growthAlertBanner: GrowthAlertBannerState?
     var insights = ScanInsights.empty
     var duplicateReportState: DuplicateReportState = .idle
     var pendingTrashRequest: TrashConfirmationRequest?
@@ -245,6 +314,7 @@ final class ScannerViewModel {
     @ObservationIgnored private var duplicateReportRevision: Int?
     @ObservationIgnored private var stableNodeIDsByPath: [String: UUID] = [:]
     @ObservationIgnored private var modelContext: ModelContext?
+    @ObservationIgnored private var growthAlertDismissTask: Task<Void, Never>?
 
     init(
         duplicateDetector: any DuplicateDetecting = DuplicateDetector(),
@@ -288,6 +358,7 @@ final class ScannerViewModel {
 
     func scan(directory: URL) {
         cancelActiveLocalScan(resetScanningState: false)
+        dismissGrowthAlert()
         advanceTreeSession()
         invalidateDuplicateReport()
 
@@ -504,6 +575,12 @@ final class ScannerViewModel {
         clearError()
     }
 
+    func dismissGrowthAlert() {
+        growthAlertDismissTask?.cancel()
+        growthAlertDismissTask = nil
+        growthAlertBanner = nil
+    }
+
     func requestMoveToTrash(_ node: FileNode) {
         clearError()
         pendingTrashRequest = TrashConfirmationRequest(
@@ -565,6 +642,7 @@ final class ScannerViewModel {
     }
 
     func resetToHomeState() {
+        dismissGrowthAlert()
         advanceTreeSession()
         cancelPendingTrashRequest()
         isScanning = false
@@ -578,6 +656,7 @@ final class ScannerViewModel {
 
     func beginRemoteScan() {
         cancelActiveLocalScan(resetScanningState: false)
+        dismissGrowthAlert()
         advanceTreeSession()
         clearVisibleTree(resetIdentityState: true)
         isScanning = true
@@ -786,11 +865,57 @@ final class ScannerViewModel {
             let record = try makeScanRecord(root: root, progress: progress)
             modelContext.insert(record)
             try modelContext.save()
+            try presentGrowthAlertIfNeeded(afterPersisting: record, in: modelContext)
         } catch {
             Self.persistenceLogger.error(
                 "Failed to persist scan history for \(root.path.path, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
         }
+    }
+
+    private func presentGrowthAlertIfNeeded(afterPersisting record: ScanRecord, in modelContext: ModelContext) throws {
+        let recentRecords = try recentRecords(for: record.rootPath, limit: 2, in: modelContext)
+
+        guard recentRecords.count == 2,
+              recentRecords.first?.persistentModelID == record.persistentModelID,
+              let bannerState = ScanGrowthAlertEvaluator.growthAlertState(from: recentRecords) else {
+            return
+        }
+
+        showGrowthAlert(bannerState)
+    }
+
+    private func recentRecords(
+        for rootPath: String,
+        limit: Int,
+        in modelContext: ModelContext
+    ) throws -> [ScanRecord] {
+        let rootPath = rootPath
+        var descriptor = FetchDescriptor<ScanRecord>(
+            predicate: #Predicate<ScanRecord> { record in
+                record.rootPath == rootPath
+            },
+            sortBy: [SortDescriptor(\ScanRecord.timestamp, order: .reverse)]
+        )
+        descriptor.fetchLimit = limit
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func showGrowthAlert(_ bannerState: GrowthAlertBannerState) {
+        growthAlertDismissTask?.cancel()
+        growthAlertBanner = bannerState
+
+        growthAlertDismissTask = Task { [weak self, bannerID = bannerState.id] in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            self?.dismissGrowthAlertIfMatching(bannerID)
+        }
+    }
+
+    private func dismissGrowthAlertIfMatching(_ bannerID: String) {
+        guard growthAlertBanner?.id == bannerID else { return }
+        growthAlertBanner = nil
+        growthAlertDismissTask = nil
     }
 
     private func resetSearch() {

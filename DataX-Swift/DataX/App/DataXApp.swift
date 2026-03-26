@@ -52,6 +52,12 @@ struct DataXApp: App {
                 .keyboardShortcut("2", modifiers: .command)
                 .disabled(!appState.hasScannedContent)
             }
+
+            CommandMenu("History") {
+                Button("Show History") {
+                    appState.showHistoryPanel = true
+                }
+            }
         }
 
         Settings {
