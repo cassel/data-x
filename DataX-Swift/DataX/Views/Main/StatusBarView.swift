@@ -115,6 +115,12 @@ struct StatusBarView: View {
 
 struct ScanProgressView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isSymbolPulseActive = false
+
+    private var motionPolicy: ScanProgressMotionPolicy {
+        ScanProgressMotionPolicy(reduceMotion: reduceMotion)
+    }
 
     var body: some View {
         VStack(spacing: 24) {
@@ -129,6 +135,7 @@ struct ScanProgressView: View {
                 Image(systemName: "doc.text.magnifyingglass")
                     .font(.system(size: 40))
                     .foregroundColor(.accentColor)
+                    .symbolEffect(.pulse, options: .repeating, isActive: isSymbolPulseActive)
             }
 
             VStack(spacing: 8) {
@@ -137,36 +144,13 @@ struct ScanProgressView: View {
                     .fontWeight(.semibold)
 
                 if let progress = appState.scannerViewModel.progress {
-                    Text("\(progress.filesScanned.formatted()) files in \(progress.directoriesScanned.formatted()) folders")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    summaryView(progress)
                 }
             }
 
             // Progress details
             if let progress = appState.scannerViewModel.progress {
-                VStack(spacing: 16) {
-                    // Linear progress indicator
-                    ProgressView()
-                        .progressViewStyle(.linear)
-                        .frame(width: 300)
-
-                    // Stats badges
-                    HStack(spacing: 20) {
-                        StatBadge(icon: "doc", value: "\(progress.filesScanned.formatted())", label: "Files")
-                        StatBadge(icon: "folder", value: "\(progress.directoriesScanned.formatted())", label: "Folders")
-                        StatBadge(icon: "internaldrive", value: progress.formattedBytes, label: "Size")
-                        StatBadge(icon: "clock", value: progress.formattedElapsedTime, label: "Elapsed")
-                    }
-
-                    // Current path
-                    Text(progress.currentPath)
-                        .font(.caption)
-                        .foregroundColor(.secondary.opacity(0.7))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: 400)
-                }
+                progressDetailsView(progress)
             }
 
             Button("Cancel") {
@@ -179,6 +163,88 @@ struct ScanProgressView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            isSymbolPulseActive = motionPolicy.allowsSymbolPulse
+        }
+        .onChange(of: reduceMotion) { _, newValue in
+            isSymbolPulseActive = !newValue
+        }
+        .onDisappear {
+            isSymbolPulseActive = false
+        }
+    }
+
+    private func summaryView(_ progress: ScanProgress) -> some View {
+        HStack(spacing: 0) {
+            AnimatedNumericValueText(
+                value: progress.filesScanned.formatted(),
+                numericValue: Double(progress.filesScanned),
+                motionPolicy: motionPolicy
+            )
+            Text(" files in ")
+            AnimatedNumericValueText(
+                value: progress.directoriesScanned.formatted(),
+                numericValue: Double(progress.directoriesScanned),
+                motionPolicy: motionPolicy
+            )
+            Text(" folders")
+        }
+        .font(.subheadline)
+        .foregroundColor(.secondary)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func progressDetailsView(_ progress: ScanProgress) -> some View {
+        let elapsedTime = progress.elapsedTime
+        let elapsedValue = ScanProgressMotionPolicy.elapsedDisplayValue(for: elapsedTime)
+        let elapsedText = ScanProgressMotionPolicy.formattedElapsedTime(for: elapsedTime)
+
+        return VStack(spacing: 16) {
+            // Linear progress indicator
+            ProgressView()
+                .progressViewStyle(.linear)
+                .frame(width: 300)
+
+            // Stats badges
+            HStack(spacing: 20) {
+                StatBadge(
+                    icon: "doc",
+                    value: progress.filesScanned.formatted(),
+                    numericValue: Double(progress.filesScanned),
+                    label: "Files",
+                    motionPolicy: motionPolicy
+                )
+                StatBadge(
+                    icon: "folder",
+                    value: progress.directoriesScanned.formatted(),
+                    numericValue: Double(progress.directoriesScanned),
+                    label: "Folders",
+                    motionPolicy: motionPolicy
+                )
+                StatBadge(
+                    icon: "internaldrive",
+                    value: progress.formattedBytes,
+                    numericValue: Double(progress.bytesScanned),
+                    label: "Size",
+                    motionPolicy: motionPolicy
+                )
+                StatBadge(
+                    icon: "clock",
+                    value: elapsedText,
+                    numericValue: elapsedValue,
+                    label: "Elapsed",
+                    motionPolicy: motionPolicy
+                )
+            }
+
+            // Current path
+            Text(progress.currentPath)
+                .font(.caption)
+                .foregroundColor(.secondary.opacity(0.7))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 400)
+        }
     }
 }
 
@@ -187,7 +253,9 @@ struct ScanProgressView: View {
 struct StatBadge: View {
     let icon: String
     let value: String
+    let numericValue: Double
     let label: String
+    let motionPolicy: ScanProgressMotionPolicy
 
     var body: some View {
         VStack(spacing: 4) {
@@ -195,7 +263,11 @@ struct StatBadge: View {
                 Image(systemName: icon)
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
-                Text(value)
+                AnimatedNumericValueText(
+                    value: value,
+                    numericValue: numericValue,
+                    motionPolicy: motionPolicy
+                )
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
             }
             Text(label)
@@ -205,6 +277,58 @@ struct StatBadge: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+struct AnimatedNumericValueText: View {
+    let value: String
+    let numericValue: Double
+    let motionPolicy: ScanProgressMotionPolicy
+
+    var body: some View {
+        Group {
+            if motionPolicy.allowsNumericRoll {
+                Text(value)
+                    .contentTransition(.numericText(value: numericValue))
+                    .animation(motionPolicy.numericRollAnimation, value: numericValue)
+            } else {
+                Text(value)
+            }
+        }
+    }
+}
+
+struct ScanProgressMotionPolicy {
+    static let numericRollDuration = 0.2
+
+    let reduceMotion: Bool
+
+    var allowsSymbolPulse: Bool {
+        !reduceMotion
+    }
+
+    var allowsNumericRoll: Bool {
+        !reduceMotion
+    }
+
+    var numericRollAnimation: Animation? {
+        allowsNumericRoll ? .smooth(duration: Self.numericRollDuration) : nil
+    }
+
+    static func elapsedDisplayValue(for elapsedTime: TimeInterval) -> Double {
+        Double(Int(elapsedTime))
+    }
+
+    static func formattedElapsedTime(for elapsedTime: TimeInterval) -> String {
+        let seconds = Int(elapsedTime)
+
+        if seconds < 60 {
+            return "\(seconds)s"
+        } else if seconds < 3600 {
+            return "\(seconds / 60)m \(seconds % 60)s"
+        } else {
+            return "\(seconds / 3600)h \(seconds % 3600 / 60)m"
+        }
     }
 }
 
