@@ -12,6 +12,9 @@ struct TreemapView: View {
 
     private let maxDepth = 6
     private let throttleInterval: TimeInterval = 0.016 // ~60fps
+    private let labelShadowColor = Color.black.opacity(0.35)
+    private let labelShadowRadius: CGFloat = 1.5
+    private let labelShadowYOffset: CGFloat = 1
 
     // Combined: hover takes priority, otherwise use highlighted from tree
     private var effectiveHighlight: FileNode? {
@@ -25,7 +28,7 @@ struct TreemapView: View {
 
                 // Static treemap layer - rasterized for performance
                 Canvas { context, _ in
-                    drawTreemapStatic(context: context)
+                    drawTreemapStatic(context: &context)
                 }
                 .drawingGroup()
 
@@ -111,7 +114,7 @@ struct TreemapView: View {
 
     // MARK: - Static Drawing
 
-    private func drawTreemapStatic(context: GraphicsContext) {
+    private func drawTreemapStatic(context: inout GraphicsContext) {
         for rect in cachedRects {
             let padding: CGFloat = rect.depth == 0 ? 1.0 : 0.5
             let insetRect = rect.cgRect.insetBy(dx: padding, dy: padding)
@@ -130,7 +133,7 @@ struct TreemapView: View {
 
             // Labels for depth 0
             if rect.depth == 0 && insetRect.width > 50 && insetRect.height > 25 {
-                drawLabel(rect, context: context, insetRect: insetRect)
+                drawLabel(rect, context: &context, insetRect: insetRect)
             }
         }
     }
@@ -170,7 +173,7 @@ struct TreemapView: View {
 
     // MARK: - Labels
 
-    private func drawLabel(_ rect: TreemapRect, context: GraphicsContext, insetRect: CGRect) {
+    private func drawLabel(_ rect: TreemapRect, context: inout GraphicsContext, insetRect: CGRect) {
         let padding: CGFloat = 4
         let w = insetRect.width - padding * 2
         let h = insetRect.height - padding * 2
@@ -184,18 +187,32 @@ struct TreemapView: View {
             name = String(name.prefix(maxChars - 1)) + "…"
         }
 
-        context.draw(
+        drawShadowedText(
             Text(name).font(.system(size: fontSize, weight: .medium)).foregroundColor(.white),
-            at: CGPoint(x: insetRect.minX + padding, y: insetRect.minY + padding + fontSize/2),
-            anchor: .leading
+            at: CGPoint(x: insetRect.minX + padding, y: insetRect.minY + padding + fontSize / 2),
+            context: &context
         )
 
         if h > 30 {
-            context.draw(
+            drawShadowedText(
                 Text(rect.node.formattedSize).font(.system(size: fontSize - 1)).foregroundColor(.white.opacity(0.8)),
                 at: CGPoint(x: insetRect.minX + padding, y: insetRect.minY + padding + fontSize + 8),
-                anchor: .leading
+                context: &context
             )
+        }
+    }
+
+    private func drawShadowedText(_ text: Text, at point: CGPoint, context: inout GraphicsContext) {
+        context.drawLayer { layer in
+            layer.addFilter(
+                .shadow(
+                    color: labelShadowColor,
+                    radius: labelShadowRadius,
+                    x: 0,
+                    y: labelShadowYOffset
+                )
+            )
+            layer.draw(text, at: point, anchor: .leading)
         }
     }
 }
