@@ -43,6 +43,7 @@
 		D395AD06C04852E1C87F33F3 /* DataXApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A2CB155009709DEEB590EC /* DataXApp.swift */; };
 		D852725830D6D693143E0216 /* DiskInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46F587C76B467E3E39FB989 /* DiskInfo.swift */; };
 		E99459F832CF805C7E668C4F /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B9325570E8663957C34F53 /* AppState.swift */; };
+		F1A9C73317D44A6EA1C4C8A1 /* TreemapLayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4B7A21E2D4C489C8C1327F1 /* TreemapLayerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -84,6 +85,7 @@
 		E1A2CB155009709DEEB590EC /* DataXApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataXApp.swift; sourceTree = "<group>"; };
 		E693237A328E7CEEC27AA4A5 /* BarChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarChartView.swift; sourceTree = "<group>"; };
 		EC70483222164363921D74FD /* SizeFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SizeFormatter.swift; sourceTree = "<group>"; };
+		E4B7A21E2D4C489C8C1327F1 /* TreemapLayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreemapLayerView.swift; sourceTree = "<group>"; };
 		FA83C573D3FA33EA8E13213D /* HeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeaderView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -153,6 +155,7 @@
 				24355B02DF6D93F7FE8E5D93 /* CirclePackingView.swift */,
 				9C86A47809903ABB773D0D2B /* IcicleView.swift */,
 				84ECCFB4499E7CC306F81347 /* SunburstView.swift */,
+				E4B7A21E2D4C489C8C1327F1 /* TreemapLayerView.swift */,
 				241CF2FC0AA6E2A4AF21C262 /* TreemapView.swift */,
 			);
 			path = Visualizations;
@@ -387,6 +390,7 @@
 				6F5BE60B9B2AF9345CE7DF28 /* StatusBarView.swift in Sources */,
 				2DAC706BBB67A62B7389958D /* SunburstView.swift in Sources */,
 				B857C9C41A9E58B87BE5ECB6 /* TreemapLayout.swift in Sources */,
+				F1A9C73317D44A6EA1C4C8A1 /* TreemapLayerView.swift in Sources */,
 				A13F9E5C7B284C91B4D0E6F1 /* TreemapSpatialIndex.swift in Sources */,
 				3E735714223F773DA4176E7B /* TreemapView.swift in Sources */,
 				2FB4C9F6CDF876C8425285EF /* WelcomeView.swift in Sources */,

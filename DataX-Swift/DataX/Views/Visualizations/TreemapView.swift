@@ -15,6 +15,8 @@ struct TreemapView: View {
     @State private var hoveredNode: FileNode?
     @State private var lastMouseLocation: CGPoint?
     @State private var lastUpdateTime: Date = .distantPast
+    @State private var rendererRevision = 0
+    @State private var animateStructuralChanges = false
     @State private var pulseExpanded = false
     @State private var deletionAnimation: TreemapDeletionAnimation?
     @State private var layoutAnimation: TreemapLayoutAnimation?
@@ -106,20 +108,11 @@ struct TreemapView: View {
             ZStack {
                 Color(nsColor: .windowBackgroundColor)
 
-                // Static treemap layer - rasterized for performance
-                mainTreemapLayer()
-
-                // Hover overlay - lightweight
-                hoverOverlayLayer()
+                rendererSurface(viewSize: geometry.size)
 
                 // Click handling
                 interactionLayer(viewSize: geometry.size)
             }
-            .background(
-                MouseTracker { location in
-                    handleMouseMove(location, in: geometry.size)
-                }
-            )
             .overlay(alignment: .topLeading) {
                 if let highlighted = effectiveHighlight {
                     InfoPanel(node: highlighted)
@@ -144,7 +137,7 @@ struct TreemapView: View {
                 buildCache(size: geometry.size)
             }
             .onChange(of: layoutRevision) { _, _ in
-                buildCache(size: geometry.size)
+                buildCache(size: geometry.size, forceRendererRefresh: true)
                 refreshHoveredNode(in: geometry.size)
             }
             .onChange(of: accessibilityReduceMotion) { _, _ in
@@ -209,29 +202,26 @@ struct TreemapView: View {
 
     // MARK: - Cache
 
-    private func buildCache(size: CGSize) {
+    private func buildCache(size: CGSize, forceRendererRefresh: Bool = false) {
         guard deletionAnimation == nil else { return }
         guard size.width > 0 && size.height > 0 else { return }
         lastViewSize = size
 
         let newRects = layoutRects(for: node, size: size)
         let newHitTestCache = makeHitTestCache(rects: newRects, size: size)
-        let sourceRects = activeRects()
+        let layoutChanged = !hasSameLayout(cachedRects, newRects)
 
-        guard !hasSameLayout(sourceRects, newRects) else {
+        guard layoutChanged || forceRendererRefresh else {
             applyHitTestCache(newHitTestCache)
             layoutAnimation = nil
+            animateStructuralChanges = false
             return
         }
 
         applyHitTestCache(newHitTestCache)
-
-        if sourceRects.isEmpty && newRects.isEmpty {
-            layoutAnimation = nil
-            return
-        }
-
-        startLayoutAnimation(from: sourceRects, to: newRects)
+        layoutAnimation = nil
+        animateStructuralChanges = layoutChanged
+        rendererRevision += 1
     }
 
     private func layoutRects(for node: FileNode, size: CGSize) -> [TreemapRect] {
@@ -288,7 +278,32 @@ struct TreemapView: View {
         return hitTestCache.hoveredRect(at: point)?.node
     }
 
-    // MARK: - Static Drawing
+    // MARK: - Renderer
+
+    @ViewBuilder
+    private func rendererSurface(viewSize: CGSize) -> some View {
+        if deletionAnimation != nil {
+            ZStack {
+                mainTreemapLayer()
+                hoverOverlayLayer()
+            }
+        } else {
+            TreemapLayerSurface(
+                rects: cachedRects,
+                revision: rendererRevision,
+                animateStructuralChanges: animateStructuralChanges,
+                highlightedNodeID: highlightedNode?.id,
+                hoveredNodeID: hoveredNode?.id,
+                reduceMotion: accessibilityReduceMotion,
+                pulseTargetID: pulseTargetRect?.id,
+                shouldRenderPulse: shouldRenderPulse,
+                zoomScale: effectiveZoomScale,
+                zoomAnchor: effectiveZoomAnchor
+            ) { location in
+                handleMouseMove(location, in: viewSize)
+            }
+        }
+    }
 
     @ViewBuilder
     private func mainTreemapLayer() -> some View {

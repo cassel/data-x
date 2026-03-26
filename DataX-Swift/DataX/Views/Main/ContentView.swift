@@ -374,24 +374,41 @@ struct ContentView: View {
         return state.selectedVisualization == .fileTree ? .treemap : state.selectedVisualization
     }
 
+    private func preservesVisualizationIdentity(
+        for visualization: AppState.VisualizationType
+    ) -> Bool {
+        visualization == .treemap || visualization == .fileTree
+    }
+
     @ViewBuilder
     private func visualizationShell(
         node: FileNode,
         treeMutationRevision: Int,
         motionPolicy: ContentTransitionMotionPolicy
     ) -> some View {
+        let visualization = visibleVisualization(for: appState)
+
         SwipeNavigationSurface(
             canNavigateBack: appState.scannerViewModel.canNavigateBack,
             onSwipeBack: handleSwipeBack
         ) {
             ZStack {
-                mainVisualization(node: node, treeMutationRevision: treeMutationRevision)
-                    .id(node.id)
-                    .transition(
-                        motionPolicy.visualizationNavigationTransition(
-                            for: visualizationNavigationDirection
+                if preservesVisualizationIdentity(for: visualization) {
+                    mainVisualization(node: node, treeMutationRevision: treeMutationRevision)
+                        .transition(
+                            motionPolicy.visualizationNavigationTransition(
+                                for: visualizationNavigationDirection
+                            )
                         )
-                    )
+                } else {
+                    mainVisualization(node: node, treeMutationRevision: treeMutationRevision)
+                        .id(node.id)
+                        .transition(
+                            motionPolicy.visualizationNavigationTransition(
+                                for: visualizationNavigationDirection
+                            )
+                        )
+                }
             }
             .clipped()
             .animation(motionPolicy.navigationAnimation, value: node.id)
