@@ -1,0 +1,44 @@
+# Rust
+/target/
+/src-tauri/target/
+
+# Agent configs (local)
+.agent/
+.claude/
+.codex/
+
+# Screenshots (keep icons and docs)
+Screenshot*.png
+*.jpg
+*.jpeg
+!docs/images/*.png
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Build artifacts
+*.app/
+*.dmg
+*.pkg
+/dist/
+
+# Node
+node_modules/
+ui/dist/
+
+# Debug
+*.log
+*.pdb
+
+# BMAD output (planning artifacts)
+/_bmad-output/
+/_bmad/
