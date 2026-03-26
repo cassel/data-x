@@ -3,6 +3,9 @@ import SwiftUI
 struct WelcomeView: View {
     @Environment(AppState.self) private var appState
     @State private var isDropTargeted = false
+    let heroNamespace: Namespace.ID
+    let usesSpatialHero: Bool
+    let isInteractive: Bool
 
     var body: some View {
         @Bindable var state = appState
@@ -36,12 +39,13 @@ struct WelcomeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
         .dropDestination(for: URL.self) { urls, _ in
-            state.handleFolderIntake(urls)
+            guard isInteractive else { return false }
+            return state.handleFolderIntake(urls)
         } isTargeted: { isTargeted in
-            self.isDropTargeted = isTargeted
+            self.isDropTargeted = isInteractive ? isTargeted : false
         }
         .sheet(isPresented: Binding(
-            get: { state.sshViewModel.showConnectionModal && state.scannerViewModel.rootNode == nil },
+            get: { isInteractive && state.sshViewModel.showConnectionModal && state.scannerViewModel.rootNode == nil },
             set: { state.sshViewModel.showConnectionModal = $0 }
         )) {
             SSHConnectionModal(existing: state.sshViewModel.editingConnection) { connection, password in
@@ -52,15 +56,17 @@ struct WelcomeView: View {
 
     private var dropZone: some View {
         ZStack {
-            Circle()
-                .fill(Color.accentColor.opacity(isDropTargeted ? 0.18 : 0.09))
-                .overlay {
-                    Circle()
-                        .strokeBorder(
-                            Color.accentColor.opacity(isDropTargeted ? 0.82 : 0.42),
-                            lineWidth: isDropTargeted ? 3 : 2
-                        )
-                }
+            TransitionHeroShell(
+                size: 300,
+                fillOpacity: isDropTargeted ? 0.18 : 0.09,
+                strokeOpacity: isDropTargeted ? 0.82 : 0.42,
+                lineWidth: isDropTargeted ? 3 : 2,
+                shadowOpacity: 0,
+                shadowRadius: 0,
+                namespace: heroNamespace,
+                usesSpatialHero: usesSpatialHero,
+                isSource: true
+            )
                 .phaseAnimator([false, true]) { content, phase in
                     content
                         .scaleEffect(isDropTargeted ? 1.02 : (phase ? 1.04 : 0.96))
@@ -72,13 +78,66 @@ struct WelcomeView: View {
                 } animation: { _ in
                     .easeInOut(duration: 2.2)
                 }
-                .frame(width: 300, height: 300)
 
             Text("Drop a folder")
                 .font(.system(size: 28, weight: .medium, design: .rounded))
                 .foregroundStyle(.primary)
+                .scaleEffect(isDropTargeted ? 1.02 : 1.0)
+                .animation(.easeInOut(duration: 0.2), value: isDropTargeted)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+enum MainViewTransitionHero {
+    static let shellID = "main-view-transition-hero-shell"
+}
+
+struct TransitionHeroShell: View {
+    let size: CGFloat
+    let fillOpacity: Double
+    let strokeOpacity: Double
+    let lineWidth: CGFloat
+    let shadowOpacity: Double
+    let shadowRadius: CGFloat
+    let namespace: Namespace.ID
+    let usesSpatialHero: Bool
+    let isSource: Bool
+
+    var body: some View {
+        Group {
+            if usesSpatialHero {
+                shell
+                    .matchedGeometryEffect(
+                        id: MainViewTransitionHero.shellID,
+                        in: namespace,
+                        properties: .frame,
+                        anchor: .center,
+                        isSource: isSource
+                    )
+            } else {
+                shell
+            }
+        }
+        .frame(width: size, height: size)
+    }
+
+    private var shell: some View {
+        Circle()
+            .fill(Color.accentColor.opacity(fillOpacity))
+            .overlay {
+                if strokeOpacity > 0, lineWidth > 0 {
+                    Circle()
+                        .strokeBorder(
+                            Color.accentColor.opacity(strokeOpacity),
+                            lineWidth: lineWidth
+                        )
+                }
+            }
+            .shadow(
+                color: Color.accentColor.opacity(shadowOpacity),
+                radius: shadowRadius
+            )
     }
 }
 

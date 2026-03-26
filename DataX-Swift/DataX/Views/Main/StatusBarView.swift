@@ -117,6 +117,8 @@ struct ScanProgressView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isSymbolPulseActive = false
+    let heroNamespace: Namespace.ID
+    let usesSpatialHero: Bool
 
     private var motionPolicy: ScanProgressMotionPolicy {
         ScanProgressMotionPolicy(reduceMotion: reduceMotion)
@@ -128,14 +130,23 @@ struct ScanProgressView: View {
 
             // Animated scan icon
             ZStack {
-                Circle()
-                    .fill(Color.accentColor.opacity(0.1))
-                    .frame(width: 100, height: 100)
+                TransitionHeroShell(
+                    size: 100,
+                    fillOpacity: 0.1,
+                    strokeOpacity: 0,
+                    lineWidth: 0,
+                    shadowOpacity: 0,
+                    shadowRadius: 0,
+                    namespace: heroNamespace,
+                    usesSpatialHero: usesSpatialHero,
+                    isSource: false
+                )
 
                 Image(systemName: "doc.text.magnifyingglass")
                     .font(.system(size: 40))
                     .foregroundColor(.accentColor)
                     .symbolEffect(.pulse, options: .repeating, isActive: isSymbolPulseActive)
+                    .transition(.opacity)
             }
 
             VStack(spacing: 8) {

@@ -1,22 +1,100 @@
 import SwiftUI
 
+enum ContentViewPhase: Equatable {
+    case welcome
+    case scanning
+    case scanned
+
+    static func resolve(isScanning: Bool, rootNode: FileNode?) -> Self {
+        if isScanning {
+            return .scanning
+        }
+
+        if rootNode != nil {
+            return .scanned
+        }
+
+        return .welcome
+    }
+
+    var minimumLeftPaneWidth: CGFloat {
+        switch self {
+        case .welcome:
+            return 300
+        case .scanning, .scanned:
+            return 280
+        }
+    }
+
+    var idealLeftPaneWidth: CGFloat? {
+        switch self {
+        case .welcome:
+            return nil
+        case .scanning:
+            return 320
+        case .scanned:
+            return 350
+        }
+    }
+}
+
+struct ContentTransitionMotionPolicy {
+    let reduceMotion: Bool
+
+    var usesSpatialHero: Bool {
+        !reduceMotion
+    }
+
+    var usesOpacityOnlyPhaseTransitions: Bool {
+        reduceMotion
+    }
+
+    var usesDirectionalResultsPaneTransition: Bool {
+        !reduceMotion
+    }
+
+    var phaseAnimation: Animation {
+        if usesOpacityOnlyPhaseTransitions {
+            return .easeInOut(duration: 0.2)
+        }
+
+        return .spring(duration: 0.4)
+    }
+
+    var handoffTransition: AnyTransition {
+        .opacity
+    }
+
+    var resultsPaneTransition: AnyTransition {
+        if usesDirectionalResultsPaneTransition {
+            return .move(edge: .trailing).combined(with: .opacity)
+        }
+
+        return .opacity
+    }
+}
+
 struct ContentView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var transitionNamespace
     @State private var isLegendVisible = false
-    private let welcomeTransition = AnyTransition.opacity.combined(with: .scale(scale: 0.98))
-    private let scanTransition = AnyTransition.opacity.combined(with: .scale(scale: 1.02))
 
     var body: some View {
         @Bindable var state = appState
+        let contentPhase = ContentViewPhase.resolve(
+            isScanning: state.scannerViewModel.isScanning,
+            rootNode: state.scannerViewModel.rootNode
+        )
+        let motionPolicy = ContentTransitionMotionPolicy(reduceMotion: reduceMotion)
 
         HSplitView {
-            leftPane(state: state)
-            rightPane(state: state)
+            leftPane(state: state, contentPhase: contentPhase, motionPolicy: motionPolicy)
+            rightPane(state: state, contentPhase: contentPhase, motionPolicy: motionPolicy)
         }
-        .animation(.easeInOut(duration: 0.3), value: state.scannerViewModel.isScanning)
-        .animation(.easeInOut(duration: 0.3), value: state.scannerViewModel.rootNode != nil)
+        .animation(motionPolicy.phaseAnimation, value: contentPhase)
         .toolbar {
-            scannedToolbar(state: state)
+            scannedToolbar(state: state, contentPhase: contentPhase)
         }
         .fileImporter(
             isPresented: $state.showFolderPicker,
@@ -41,37 +119,64 @@ struct ContentView: View {
         }
     }
 
-    @ViewBuilder
-    private func leftPane(state: AppState) -> some View {
-        if state.scannerViewModel.isScanning {
-            ScanProgressView()
-                .frame(minWidth: 280, idealWidth: 320)
-                .transition(scanTransition)
-        } else if let rootNode = state.scannerViewModel.rootNode {
-            FileTreePanel(
-                rootNode: rootNode,
-                currentNode: state.scannerViewModel.currentNode,
-                highlightedNode: Binding(
-                    get: { state.highlightedNode },
-                    set: { state.highlightedNode = $0 }
-                ),
-                onNavigate: { node in
-                    state.scannerViewModel.navigateTo(node)
-                    state.highlightedNode = nil  // Clear highlight when navigating
+    private func leftPane(
+        state: AppState,
+        contentPhase: ContentViewPhase,
+        motionPolicy: ContentTransitionMotionPolicy
+    ) -> some View {
+        ZStack {
+            if contentPhase == .scanned, let rootNode = state.scannerViewModel.rootNode {
+                FileTreePanel(
+                    rootNode: rootNode,
+                    currentNode: state.scannerViewModel.currentNode,
+                    highlightedNode: Binding(
+                        get: { state.highlightedNode },
+                        set: { state.highlightedNode = $0 }
+                    ),
+                    onNavigate: { node in
+                        state.scannerViewModel.navigateTo(node)
+                        state.highlightedNode = nil  // Clear highlight when navigating
+                    }
+                )
+                .transition(motionPolicy.handoffTransition)
+            } else {
+                ZStack {
+                    WelcomeView(
+                        heroNamespace: transitionNamespace,
+                        usesSpatialHero: motionPolicy.usesSpatialHero,
+                        isInteractive: contentPhase == .welcome
+                    )
+                    .opacity(contentPhase == .welcome ? 1 : 0)
+                    .allowsHitTesting(contentPhase == .welcome)
+                    .accessibilityHidden(contentPhase != .welcome)
+
+                    if contentPhase == .scanning {
+                        ScanProgressView(
+                            heroNamespace: transitionNamespace,
+                            usesSpatialHero: motionPolicy.usesSpatialHero
+                        )
+                        .transition(motionPolicy.handoffTransition)
+                    }
                 }
-            )
-            .frame(minWidth: 280, idealWidth: 350)
-            .transition(.opacity)
-        } else {
-            WelcomeView()
-                .frame(minWidth: 300)
-                .transition(welcomeTransition)
+                .transition(motionPolicy.handoffTransition)
+            }
         }
+        .frame(
+            minWidth: contentPhase.minimumLeftPaneWidth,
+            idealWidth: contentPhase.idealLeftPaneWidth,
+            maxWidth: .infinity,
+            maxHeight: .infinity
+        )
+        .contentTransition(.opacity)
     }
 
     @ViewBuilder
-    private func rightPane(state: AppState) -> some View {
-        if !state.scannerViewModel.isScanning,
+    private func rightPane(
+        state: AppState,
+        contentPhase: ContentViewPhase,
+        motionPolicy: ContentTransitionMotionPolicy
+    ) -> some View {
+        if contentPhase == .scanned,
            let rootNode = state.scannerViewModel.rootNode {
             let node = state.scannerViewModel.currentNode ?? rootNode
 
@@ -115,13 +220,14 @@ struct ContentView: View {
             }
             .frame(minWidth: 400)
             .background(.regularMaterial)
-            .transition(.move(edge: .trailing).combined(with: .opacity))
+            .contentTransition(.opacity)
+            .transition(motionPolicy.resultsPaneTransition)
         }
     }
 
     @ToolbarContentBuilder
-    private func scannedToolbar(state: AppState) -> some ToolbarContent {
-        if !state.scannerViewModel.isScanning,
+    private func scannedToolbar(state: AppState, contentPhase: ContentViewPhase) -> some ToolbarContent {
+        if contentPhase == .scanned,
            state.scannerViewModel.rootNode != nil {
             ToolbarItemGroup(placement: .automatic) {
                 Button {
