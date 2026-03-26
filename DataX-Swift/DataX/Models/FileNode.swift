@@ -184,3 +184,28 @@ struct FileNodeData: Sendable {
         return node
     }
 }
+
+enum FileNodePathResolver {
+    static func path(from root: FileNode, to target: FileNode) -> [FileNode] {
+        var path: [FileNode] = []
+
+        func findPath(from node: FileNode) -> Bool {
+            if node.id == target.id {
+                path.append(node)
+                return true
+            }
+
+            for child in node.children ?? [] {
+                if findPath(from: child) {
+                    path.insert(node, at: 0)
+                    return true
+                }
+            }
+
+            return false
+        }
+
+        _ = findPath(from: root)
+        return path.isEmpty ? [root] : path
+    }
+}

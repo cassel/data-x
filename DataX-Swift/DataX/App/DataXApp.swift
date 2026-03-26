@@ -43,6 +43,12 @@ struct DataXApp: App {
                 }
                 .keyboardShortcut("1", modifiers: .command)
                 .disabled(!appState.hasScannedContent)
+
+                Button("Sunburst") {
+                    appState.selectVisualizationFromCommand(.sunburst)
+                }
+                .keyboardShortcut("2", modifiers: .command)
+                .disabled(!appState.hasScannedContent)
             }
         }
 

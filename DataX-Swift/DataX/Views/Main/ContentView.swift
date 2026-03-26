@@ -377,7 +377,7 @@ struct ContentView: View {
     private func preservesVisualizationIdentity(
         for visualization: AppState.VisualizationType
     ) -> Bool {
-        visualization == .treemap
+        visualization == .treemap || visualization == .sunburst
     }
 
     @ViewBuilder
@@ -644,7 +644,7 @@ struct BreadcrumbView: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
-                let path = buildPath(to: node, from: rootNode)
+                let path = FileNodePathResolver.path(from: rootNode, to: node)
 
                 ForEach(Array(path.enumerated()), id: \.element.id) { index, pathNode in
                     if index > 0 {
@@ -677,27 +677,6 @@ struct BreadcrumbView: View {
             .padding(.vertical, 6)
         }
         .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-    private func buildPath(to target: FileNode, from root: FileNode) -> [FileNode] {
-        var path: [FileNode] = []
-
-        func find(node: FileNode, target: FileNode) -> Bool {
-            if node.id == target.id {
-                path.append(node)
-                return true
-            }
-            for child in node.children ?? [] {
-                if find(node: child, target: target) {
-                    path.insert(node, at: 0)
-                    return true
-                }
-            }
-            return false
-        }
-
-        _ = find(node: root, target: target)
-        return path.isEmpty ? [root] : path
     }
 }
 
