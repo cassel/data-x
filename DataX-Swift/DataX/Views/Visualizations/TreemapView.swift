@@ -408,13 +408,23 @@ struct TreemapView: View {
             drawRectFillAndBorder(rect, path: path, context: &context)
         }
 
-        if rect.depth == 0 && insetRect.width > 50 && insetRect.height > 25 {
-            drawLabel(rect, context: &context, insetRect: insetRect)
+        if let labelLayout = rect.labelLayout {
+            drawLabel(labelLayout, rect: rect, context: &context)
         }
     }
 
     private func drawRectFillAndBorder(_ rect: TreemapRect, path: Path, context: inout GraphicsContext) {
-        context.fill(path, with: .color(rect.color))
+        let shadingStyle = TreemapColorStyling.shadingStyle(for: rect.color, depth: rect.depth)
+        let gradientRect = rect.displayRect
+
+        context.fill(
+            path,
+            with: .linearGradient(
+                Gradient(colors: [shadingStyle.gradientStartColor, shadingStyle.gradientEndColor]),
+                startPoint: CGPoint(x: gradientRect.minX, y: gradientRect.minY),
+                endPoint: CGPoint(x: gradientRect.maxX, y: gradientRect.maxY)
+            )
+        )
 
         if rect.depth < 2 {
             context.stroke(path, with: .color(.black.opacity(0.2)), lineWidth: 0.5)
@@ -878,30 +888,27 @@ struct TreemapView: View {
 
     // MARK: - Labels
 
-    private func drawLabel(_ rect: TreemapRect, context: inout GraphicsContext, insetRect: CGRect) {
-        let padding: CGFloat = 4
-        let w = insetRect.width - padding * 2
-        let h = insetRect.height - padding * 2
-        guard w > 25, h > 12 else { return }
-
-        let fontSize = min(max(9, h / 4), 12)
-        let maxChars = Int(w / (fontSize * 0.55))
-        var name = rect.node.name
-        if name.count > maxChars {
-            if maxChars < 3 { return }
-            name = String(name.prefix(maxChars - 1)) + "…"
-        }
-
+    private func drawLabel(_ layout: TreemapLabelLayout, rect: TreemapRect, context: inout GraphicsContext) {
         drawShadowedText(
-            Text(name).font(.system(size: fontSize, weight: .medium)).foregroundColor(.white),
-            at: CGPoint(x: insetRect.minX + padding, y: insetRect.minY + padding + fontSize / 2),
+            Text(layout.displayName)
+                .font(.system(size: layout.fontSize, weight: .medium))
+                .foregroundColor(.white),
+            at: CGPoint(
+                x: layout.nameFrame.minX,
+                y: layout.nameFrame.minY + layout.fontSize / 2
+            ),
             context: &context
         )
 
-        if h > 30 {
+        if let sizeFrame = layout.sizeFrame {
             drawShadowedText(
-                Text(rect.node.formattedSize).font(.system(size: fontSize - 1)).foregroundColor(.white.opacity(0.8)),
-                at: CGPoint(x: insetRect.minX + padding, y: insetRect.minY + padding + fontSize + 8),
+                Text(rect.node.formattedSize)
+                    .font(.system(size: layout.fontSize - 1))
+                    .foregroundColor(.white.opacity(0.8)),
+                at: CGPoint(
+                    x: sizeFrame.minX,
+                    y: sizeFrame.minY + max(layout.fontSize - 1, 8) / 2
+                ),
                 context: &context
             )
         }

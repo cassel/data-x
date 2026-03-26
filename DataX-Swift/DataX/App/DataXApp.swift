@@ -36,6 +36,14 @@ struct DataXApp: App {
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(appState.scannerViewModel.rootNode == nil)
             }
+
+            CommandMenu("Visualization") {
+                Button("Treemap") {
+                    appState.selectVisualizationFromCommand(.treemap)
+                }
+                .keyboardShortcut("1", modifiers: .command)
+                .disabled(!appState.hasScannedContent)
+            }
         }
 
         Settings {

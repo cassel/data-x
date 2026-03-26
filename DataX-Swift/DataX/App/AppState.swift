@@ -32,6 +32,10 @@ final class AppState {
     var highlightedNode: FileNode?  // Selected in tree, highlighted in treemap (not navigated)
     @ObservationIgnored private var activeSecurityScopedDirectory: URL?
 
+    var hasScannedContent: Bool {
+        scannerViewModel.rootNode != nil
+    }
+
     enum VisualizationType: String, CaseIterable, Identifiable {
         case treemap = "Treemap"
         case sunburst = "Sunburst"
@@ -53,6 +57,11 @@ final class AppState {
     func refresh() {
         guard let url = lastScannedURL else { return }
         scannerViewModel.scan(directory: url)
+    }
+
+    func selectVisualizationFromCommand(_ visualization: VisualizationType) {
+        guard hasScannedContent else { return }
+        selectedVisualization = visualization
     }
 
     func returnHome() {

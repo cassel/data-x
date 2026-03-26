@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import AppKit
 import SwiftUI
 
 struct TreemapRect: Identifiable {
@@ -194,13 +195,7 @@ enum TreemapLayout {
             baseColor = node.category.color
         }
 
-        // Darken by depth
-        let nsColor = NSColor(baseColor)
-        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        nsColor.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-
-        let newB = max(0.25, b - CGFloat(depth) * 0.05)
-        return Color(NSColor(hue: h, saturation: s, brightness: newB, alpha: a))
+        return TreemapColorStyling.fillColor(from: baseColor, depth: depth)
     }
 
     private static func computeDominantColor(for node: FileNode) -> Color {
@@ -267,5 +262,98 @@ enum TreemapLayout {
             guard width > 0 && length > 0 else { return Double.infinity }
             return max(length / width, width / length)
         }.max() ?? .infinity
+    }
+}
+
+struct TreemapShadingStyle: Equatable {
+    let fillColor: Color
+    let gradientStartColor: Color
+    let gradientEndColor: Color
+}
+
+enum TreemapColorStyling {
+    static func fillColor(from baseColor: Color, depth: Int) -> Color {
+        let components = hsbaComponents(for: baseColor)
+        let isNeutral = components.saturation < 0.12
+
+        let adjustedSaturation: CGFloat
+        if isNeutral {
+            adjustedSaturation = min(max(components.saturation * 1.1, 0.03), 0.18)
+        } else {
+            adjustedSaturation = min(max(components.saturation, 0.58), 0.9)
+        }
+
+        let brightnessCeiling: CGFloat = isNeutral ? 0.58 : 0.8
+        let brightnessFloor: CGFloat = isNeutral ? 0.46 : 0.52
+        let normalizedBrightness = min(max(components.brightness, brightnessFloor), brightnessCeiling)
+        let depthDarkening = min(CGFloat(depth) * (isNeutral ? 0.025 : 0.032), isNeutral ? 0.14 : 0.18)
+        let brightness = max(isNeutral ? 0.34 : 0.36, normalizedBrightness - depthDarkening)
+
+        return makeColor(
+            hue: components.hue,
+            saturation: adjustedSaturation,
+            brightness: brightness,
+            alpha: components.alpha
+        )
+    }
+
+    static func shadingStyle(for fillColor: Color, depth: Int) -> TreemapShadingStyle {
+        let lightening = max(0.025, 0.055 - CGFloat(depth) * 0.004)
+        let darkening = max(0.02, 0.05 - CGFloat(depth) * 0.0035)
+
+        return TreemapShadingStyle(
+            fillColor: fillColor,
+            gradientStartColor: adjust(fillColor, brightnessDelta: lightening, saturationDelta: -0.02),
+            gradientEndColor: adjust(fillColor, brightnessDelta: -darkening, saturationDelta: 0.015)
+        )
+    }
+
+    private static func adjust(
+        _ color: Color,
+        brightnessDelta: CGFloat,
+        saturationDelta: CGFloat
+    ) -> Color {
+        let components = hsbaComponents(for: color)
+        let saturation = min(max(components.saturation + saturationDelta, 0), 1)
+        let brightness = min(max(components.brightness + brightnessDelta, 0), 1)
+
+        return makeColor(
+            hue: components.hue,
+            saturation: saturation,
+            brightness: brightness,
+            alpha: components.alpha
+        )
+    }
+
+    private static func hsbaComponents(for color: Color) -> (
+        hue: CGFloat,
+        saturation: CGFloat,
+        brightness: CGFloat,
+        alpha: CGFloat
+    ) {
+        let converted = NSColor(color).usingColorSpace(.extendedSRGB) ?? NSColor(color)
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 0
+
+        converted.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+        return (hue, saturation, brightness, alpha)
+    }
+
+    private static func makeColor(
+        hue: CGFloat,
+        saturation: CGFloat,
+        brightness: CGFloat,
+        alpha: CGFloat
+    ) -> Color {
+        Color(
+            NSColor(
+                hue: hue,
+                saturation: saturation,
+                brightness: brightness,
+                alpha: alpha
+            )
+        )
     }
 }

@@ -147,7 +147,7 @@ final class TreemapLayerHostingView: NSView {
     private let highlightBorderLayer = CAShapeLayer()
 
     private var trackingArea: NSTrackingArea?
-    private var shapeLayersByID: [UUID: CAShapeLayer] = [:]
+    private var shapeLayersByID: [UUID: TreemapBlockLayer] = [:]
     private var currentRectsByID: [UUID: TreemapRect] = [:]
     private var currentTopLevelRects: [TreemapRect] = []
     private var currentOrderedIDs: [UUID] = []
@@ -301,7 +301,7 @@ final class TreemapLayerHostingView: NSView {
             CATransaction.setDisableActions(true)
         }
 
-        var removedLayers: [CAShapeLayer] = []
+        var removedLayers: [TreemapBlockLayer] = []
 
         for removedID in diff.removedIDs {
             guard let layer = shapeLayersByID[removedID] else { continue }
@@ -352,9 +352,9 @@ final class TreemapLayerHostingView: NSView {
         rebuildLabelLayers(using: snapshot.rects)
     }
 
-    private func makeShapeLayer(for rect: TreemapRect) -> CAShapeLayer {
-        let layer = CAShapeLayer()
-        layer.contentsScale = currentContentsScale
+    private func makeShapeLayer(for rect: TreemapRect) -> TreemapBlockLayer {
+        let layer = TreemapBlockLayer()
+        layer.updateContentsScale(currentContentsScale)
         layer.actions = [
             "contents": NSNull(),
             "hidden": NSNull()
@@ -365,26 +365,18 @@ final class TreemapLayerHostingView: NSView {
 
     private func apply(
         rect: CGRect,
-        to layer: CAShapeLayer,
+        to layer: TreemapBlockLayer,
         color: Color,
         depth: Int,
         opacity: Float
     ) {
         let safeRect = rect.standardized
-        let cornerRadius = depth == 0 ? CGFloat(2) : CGFloat(1)
-        let pathRect = CGRect(origin: .zero, size: safeRect.size)
-
-        layer.frame = safeRect
-        layer.path = CGPath(
-            roundedRect: pathRect,
-            cornerWidth: cornerRadius,
-            cornerHeight: cornerRadius,
-            transform: nil
+        layer.apply(
+            rect: safeRect,
+            style: TreemapColorStyling.shadingStyle(for: color, depth: depth),
+            depth: depth,
+            opacity: opacity
         )
-        layer.fillColor = NSColor(color).cgColor
-        layer.strokeColor = depth < 2 ? NSColor.black.withAlphaComponent(0.2).cgColor : nil
-        layer.lineWidth = depth < 2 ? 0.5 : 0
-        layer.opacity = opacity
     }
 
     private func rebuildLabelLayers(using rects: [TreemapRect]) {
@@ -405,8 +397,7 @@ final class TreemapLayerHostingView: NSView {
     }
 
     private func makeLabelLayers(for rect: TreemapRect) -> TreemapTextLayers? {
-        let labelLayout = rect.labelLayout
-        guard let displayName = labelLayout.displayName else { return nil }
+        guard let labelLayout = rect.labelLayout else { return nil }
 
         let nameLayer = CATextLayer()
         nameLayer.contentsScale = currentContentsScale
@@ -418,7 +409,7 @@ final class TreemapLayerHostingView: NSView {
         nameLayer.shadowRadius = 1.5
         nameLayer.shadowOffset = CGSize(width: 0, height: 1)
         nameLayer.string = NSAttributedString(
-            string: displayName,
+            string: labelLayout.displayName,
             attributes: [
                 .font: NSFont.systemFont(ofSize: labelLayout.fontSize, weight: .medium),
                 .foregroundColor: NSColor.white
@@ -578,7 +569,7 @@ final class TreemapLayerHostingView: NSView {
         CATransaction.setDisableActions(true)
 
         for layer in shapeLayersByID.values {
-            layer.contentsScale = currentContentsScale
+            layer.updateContentsScale(currentContentsScale)
         }
 
         for layer in labelContainerLayer.sublayers ?? [] {
@@ -593,19 +584,177 @@ final class TreemapLayerHostingView: NSView {
     }
 }
 
+private final class TreemapBlockLayer: CALayer {
+    private let gradientLayer = CAGradientLayer()
+    private let borderLayer = CAShapeLayer()
+    private let maskLayer = CAShapeLayer()
+
+    override init() {
+        super.init()
+
+        isGeometryFlipped = true
+        gradientLayer.isGeometryFlipped = true
+        borderLayer.isGeometryFlipped = true
+
+        gradientLayer.startPoint = CGPoint(x: 0, y: 0)
+        gradientLayer.endPoint = CGPoint(x: 1, y: 1)
+        gradientLayer.mask = maskLayer
+
+        borderLayer.fillColor = nil
+
+        addSublayer(gradientLayer)
+        addSublayer(borderLayer)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func apply(
+        rect: CGRect,
+        style: TreemapShadingStyle,
+        depth: Int,
+        opacity: Float
+    ) {
+        let cornerRadius = depth == 0 ? CGFloat(2) : CGFloat(1)
+        let pathRect = CGRect(origin: .zero, size: rect.size)
+        let roundedPath = CGPath(
+            roundedRect: pathRect,
+            cornerWidth: cornerRadius,
+            cornerHeight: cornerRadius,
+            transform: nil
+        )
+
+        frame = rect
+        self.opacity = opacity
+
+        gradientLayer.frame = bounds
+        gradientLayer.colors = [
+            NSColor(style.gradientStartColor).cgColor,
+            NSColor(style.gradientEndColor).cgColor
+        ]
+
+        maskLayer.frame = bounds
+        maskLayer.path = roundedPath
+
+        borderLayer.frame = bounds
+        borderLayer.path = roundedPath
+        borderLayer.strokeColor = depth < 2 ? NSColor.black.withAlphaComponent(0.2).cgColor : nil
+        borderLayer.lineWidth = depth < 2 ? 0.5 : 0
+    }
+
+    func updateContentsScale(_ scale: CGFloat) {
+        contentsScale = scale
+        gradientLayer.contentsScale = scale
+        borderLayer.contentsScale = scale
+        maskLayer.contentsScale = scale
+    }
+}
+
 private struct TreemapTextLayers {
     let nameLayer: CATextLayer
     let sizeLayer: CATextLayer?
 }
 
-private struct TreemapLabelLayout {
-    let displayName: String?
+struct TreemapLabelLayout: Equatable {
+    let displayName: String
     let nameFrame: CGRect
     let sizeFrame: CGRect?
     let fontSize: CGFloat
 }
 
-private extension TreemapRect {
+enum TreemapLabelPolicy {
+    private static let padding: CGFloat = 4
+    private static let sizeLineSpacing: CGFloat = 6
+    private static let minimumNameCharacters = 4
+
+    static func makeLayout(
+        name: String,
+        sizeText: String,
+        in rect: CGRect,
+        depth: Int
+    ) -> TreemapLabelLayout? {
+        guard depth == 0 else { return nil }
+
+        let contentRect = rect.insetBy(dx: padding, dy: padding)
+        guard contentRect.width >= 52, contentRect.height >= 18 else { return nil }
+
+        let fontSize = min(max(9, contentRect.height / 4), 12)
+        let nameFont = NSFont.systemFont(ofSize: fontSize, weight: .medium)
+        let sizeFont = NSFont.systemFont(ofSize: max(fontSize - 1, 8))
+        let nameHeight = ceil(nameFont.ascender - nameFont.descender) + 2
+        let sizeHeight = ceil(sizeFont.ascender - sizeFont.descender) + 2
+
+        guard contentRect.width >= minimumTruncatedNameWidth(using: nameFont) else { return nil }
+        guard let displayName = fittedName(name, width: contentRect.width, font: nameFont) else { return nil }
+
+        let nameFrame = CGRect(
+            x: contentRect.minX,
+            y: contentRect.minY,
+            width: contentRect.width,
+            height: nameHeight
+        )
+
+        let sizeFrame: CGRect?
+        let sizeWidth = measuredWidth(of: sizeText, using: sizeFont)
+        let requiredHeight = nameHeight + sizeLineSpacing + sizeHeight
+        if contentRect.height >= requiredHeight &&
+            contentRect.width >= sizeWidth &&
+            contentRect.width >= 84 {
+            sizeFrame = CGRect(
+                x: contentRect.minX,
+                y: contentRect.minY + nameHeight + sizeLineSpacing,
+                width: contentRect.width,
+                height: sizeHeight
+            )
+        } else {
+            sizeFrame = nil
+        }
+
+        return TreemapLabelLayout(
+            displayName: displayName,
+            nameFrame: nameFrame,
+            sizeFrame: sizeFrame,
+            fontSize: fontSize
+        )
+    }
+
+    private static func fittedName(_ name: String, width: CGFloat, font: NSFont) -> String? {
+        guard measuredWidth(of: name, using: font) <= width else {
+            let minimumVisibleCharacters = min(minimumNameCharacters, name.count)
+            guard minimumVisibleCharacters > 0 else { return nil }
+
+            let minimumCandidate = String(name.prefix(minimumVisibleCharacters)) + "…"
+            guard measuredWidth(of: minimumCandidate, using: font) <= width else { return nil }
+
+            for characterCount in stride(from: name.count, through: minimumVisibleCharacters, by: -1) {
+                let candidate = String(name.prefix(characterCount)) + "…"
+                if measuredWidth(of: candidate, using: font) <= width {
+                    return candidate
+                }
+            }
+
+            return minimumCandidate
+        }
+
+        return name
+    }
+
+    private static func minimumTruncatedNameWidth(using font: NSFont) -> CGFloat {
+        measuredWidth(
+            of: String(repeating: "W", count: minimumNameCharacters) + "…",
+            using: font
+        )
+    }
+
+    private static func measuredWidth(of text: String, using font: NSFont) -> CGFloat {
+        ceil(
+            (text as NSString).size(withAttributes: [.font: font]).width
+        )
+    }
+}
+
+extension TreemapRect {
     var displayPadding: CGFloat {
         depth == 0 ? 1.0 : 0.5
     }
@@ -642,64 +791,15 @@ private extension TreemapRect {
     }
 
     var shouldShowTopLevelLabel: Bool {
-        depth == 0 && displayRect.width > 50 && displayRect.height > 25
+        labelLayout != nil
     }
 
-    var labelLayout: TreemapLabelLayout {
-        let padding: CGFloat = 4
-        let rect = displayRect
-        let width = rect.width - padding * 2
-        let height = rect.height - padding * 2
-
-        guard width > 25, height > 12 else {
-            return TreemapLabelLayout(
-                displayName: nil,
-                nameFrame: .zero,
-                sizeFrame: nil,
-                fontSize: 0
-            )
-        }
-
-        let fontSize = min(max(9, height / 4), 12)
-        let maxChars = Int(width / (fontSize * 0.55))
-        guard maxChars >= 3 else {
-            return TreemapLabelLayout(
-                displayName: nil,
-                nameFrame: .zero,
-                sizeFrame: nil,
-                fontSize: fontSize
-            )
-        }
-
-        var displayName = node.name
-        if displayName.count > maxChars {
-            displayName = String(displayName.prefix(maxChars - 1)) + "…"
-        }
-
-        let nameFrame = CGRect(
-            x: rect.minX + padding,
-            y: rect.minY + padding,
-            width: width,
-            height: fontSize + 4
-        )
-
-        let sizeFrame: CGRect?
-        if height > 30 {
-            sizeFrame = CGRect(
-                x: rect.minX + padding,
-                y: rect.minY + padding + fontSize + 8,
-                width: width,
-                height: fontSize + 3
-            )
-        } else {
-            sizeFrame = nil
-        }
-
-        return TreemapLabelLayout(
-            displayName: displayName,
-            nameFrame: nameFrame,
-            sizeFrame: sizeFrame,
-            fontSize: fontSize
+    var labelLayout: TreemapLabelLayout? {
+        TreemapLabelPolicy.makeLayout(
+            name: node.name,
+            sizeText: node.formattedSize,
+            in: displayRect,
+            depth: depth
         )
     }
 }
