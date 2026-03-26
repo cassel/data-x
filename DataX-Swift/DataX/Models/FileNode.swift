@@ -48,6 +48,32 @@ final class FileNode: Identifiable, Hashable {
         self.fileCount = isDirectory ? 0 : 1
     }
 
+    init(
+        id: UUID,
+        name: String,
+        path: URL,
+        isDirectory: Bool,
+        isHidden: Bool,
+        isSymlink: Bool,
+        fileExtension: String?,
+        modificationDate: Date?,
+        size: UInt64,
+        fileCount: Int,
+        children: [FileNode]?
+    ) {
+        self.id = id
+        self.name = name
+        self.path = path
+        self.isDirectory = isDirectory
+        self.isHidden = isHidden
+        self.isSymlink = isSymlink
+        self.fileExtension = fileExtension
+        self.modificationDate = modificationDate
+        self.size = size
+        self.fileCount = fileCount
+        self.children = children
+    }
+
     // MARK: - Hashable
 
     static func == (lhs: FileNode, rhs: FileNode) -> Bool {
@@ -69,6 +95,36 @@ final class FileNode: Identifiable, Hashable {
             }
         }
         return nil
+    }
+
+    func containsNode(withID targetID: UUID) -> Bool {
+        if id == targetID {
+            return true
+        }
+
+        return children?.contains { $0.containsNode(withID: targetID) } ?? false
+    }
+
+    func clonedSubtree(removingNodeWithID targetID: UUID) -> FileNode? {
+        guard id != targetID else { return nil }
+
+        let clonedChildren = children?.compactMap { $0.clonedSubtree(removingNodeWithID: targetID) }
+        let rolledUpSize = clonedChildren?.reduce(0) { $0 + $1.size } ?? 0
+        let rolledUpFileCount = clonedChildren?.reduce(0) { $0 + $1.fileCount } ?? 0
+
+        return FileNode(
+            id: id,
+            name: name,
+            path: path,
+            isDirectory: isDirectory,
+            isHidden: isHidden,
+            isSymlink: isSymlink,
+            fileExtension: fileExtension,
+            modificationDate: modificationDate,
+            size: isDirectory ? (clonedChildren != nil ? rolledUpSize : size) : size,
+            fileCount: isDirectory ? (clonedChildren != nil ? rolledUpFileCount : fileCount) : fileCount,
+            children: clonedChildren
+        )
     }
 
     func allFiles() -> [FileNode] {

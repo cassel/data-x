@@ -157,11 +157,17 @@ struct ContentView: View {
             isScanning: state.scannerViewModel.isScanning,
             rootNode: state.scannerViewModel.rootNode
         )
+        let treeMutationRevision = state.scannerViewModel.treeMutationRevision
         let motionPolicy = ContentTransitionMotionPolicy(reduceMotion: reduceMotion)
 
         HSplitView {
             leftPane(state: state, contentPhase: contentPhase, motionPolicy: motionPolicy)
-            rightPane(state: state, contentPhase: contentPhase, motionPolicy: motionPolicy)
+            rightPane(
+                state: state,
+                contentPhase: contentPhase,
+                treeMutationRevision: treeMutationRevision,
+                motionPolicy: motionPolicy
+            )
         }
         .animation(motionPolicy.phaseAnimation, value: contentPhase)
         .toolbar {
@@ -204,6 +210,7 @@ struct ContentView: View {
                         get: { state.highlightedNode },
                         set: { state.highlightedNode = $0 }
                     ),
+                    onMoveToTrash: moveToTrashImmediately,
                     onNavigate: { node in
                         navigate(to: node, clearHighlight: true)
                     }
@@ -244,6 +251,7 @@ struct ContentView: View {
     private func rightPane(
         state: AppState,
         contentPhase: ContentViewPhase,
+        treeMutationRevision: Int,
         motionPolicy: ContentTransitionMotionPolicy
     ) -> some View {
         if contentPhase == .scanned,
@@ -275,7 +283,11 @@ struct ContentView: View {
 
                 Divider()
 
-                visualizationShell(node: node, motionPolicy: motionPolicy)
+                visualizationShell(
+                    node: node,
+                    treeMutationRevision: treeMutationRevision,
+                    motionPolicy: motionPolicy
+                )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 Divider()
@@ -362,6 +374,7 @@ struct ContentView: View {
     @ViewBuilder
     private func visualizationShell(
         node: FileNode,
+        treeMutationRevision: Int,
         motionPolicy: ContentTransitionMotionPolicy
     ) -> some View {
         SwipeNavigationSurface(
@@ -369,7 +382,7 @@ struct ContentView: View {
             onSwipeBack: handleSwipeBack
         ) {
             ZStack {
-                mainVisualization(node: node)
+                mainVisualization(node: node, treeMutationRevision: treeMutationRevision)
                     .id(node.id)
                     .transition(
                         motionPolicy.visualizationNavigationTransition(
@@ -389,10 +402,17 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func mainVisualization(node: FileNode) -> some View {
+    private func mainVisualization(node: FileNode, treeMutationRevision: Int) -> some View {
         switch appState.selectedVisualization {
         case .treemap:
-            TreemapView(node: node, highlightedNode: appState.highlightedNode) { navigate(to: $0) }
+            TreemapView(
+                node: node,
+                highlightedNode: appState.highlightedNode,
+                onSelect: { navigate(to: $0) },
+                layoutRevision: treeMutationRevision,
+                onMoveToTrash: { appState.scannerViewModel.beginMoveToTrash($0) },
+                onCommitMoveToTrash: commitMoveToTrash
+            )
         case .sunburst:
             SunburstView(node: node) { navigate(to: $0) }
         case .icicle:
@@ -402,7 +422,14 @@ struct ContentView: View {
         case .circlePacking:
             CirclePackingView(node: node) { navigate(to: $0) }
         case .fileTree:
-            TreemapView(node: node, highlightedNode: appState.highlightedNode) { navigate(to: $0) }
+            TreemapView(
+                node: node,
+                highlightedNode: appState.highlightedNode,
+                onSelect: { navigate(to: $0) },
+                layoutRevision: treeMutationRevision,
+                onMoveToTrash: { appState.scannerViewModel.beginMoveToTrash($0) },
+                onCommitMoveToTrash: commitMoveToTrash
+            )
         }
     }
 
@@ -441,6 +468,25 @@ struct ContentView: View {
         }
 
         return navigationStack.count + 1
+    }
+
+    private func moveToTrashImmediately(_ node: FileNode) {
+        guard appState.scannerViewModel.beginMoveToTrash(node) else { return }
+        commitMoveToTrash(node)
+    }
+
+    private func commitMoveToTrash(_ node: FileNode) {
+        clearHighlightIfNeeded(forRemovedNode: node)
+        appState.scannerViewModel.commitMoveToTrash(node)
+    }
+
+    private func clearHighlightIfNeeded(forRemovedNode node: FileNode) {
+        guard let highlightedNode = appState.highlightedNode,
+              node.containsNode(withID: highlightedNode.id) else {
+            return
+        }
+
+        appState.highlightedNode = nil
     }
 }
 
@@ -521,6 +567,7 @@ struct FileTreePanel: View {
     let rootNode: FileNode
     let currentNode: FileNode?  // Currently navigated node (shown in visualization)
     @Binding var highlightedNode: FileNode?  // Selected in tree (highlighted in treemap)
+    let onMoveToTrash: (FileNode) -> Void
     let onNavigate: (FileNode) -> Void  // Double-click to navigate
 
     @State private var expandedNodes: Set<UUID> = []
@@ -571,6 +618,7 @@ struct FileTreePanel: View {
                     expandedNodes: $expandedNodes,
                     searchText: searchText,
                     level: 0,
+                    onMoveToTrash: onMoveToTrash,
                     onNavigate: onNavigate
                 )
             }
@@ -655,6 +703,7 @@ struct FileTreeNode: View {
     @Binding var expandedNodes: Set<UUID>
     let searchText: String
     let level: Int
+    let onMoveToTrash: (FileNode) -> Void
     let onNavigate: (FileNode) -> Void  // Double click navigates
 
     private var isExpanded: Bool {
@@ -707,6 +756,7 @@ struct FileTreeNode: View {
                                 expandedNodes: $expandedNodes,
                                 searchText: searchText,
                                 level: level + 1,
+                                onMoveToTrash: onMoveToTrash,
                                 onNavigate: onNavigate
                             )
                         }
@@ -825,7 +875,7 @@ struct FileTreeNode: View {
         Divider()
 
         Button(role: .destructive) {
-            try? FileOperationsService.moveToTrash(node.path)
+            onMoveToTrash(node)
         } label: {
             Label("Move to Trash", systemImage: "trash")
         }

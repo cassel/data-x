@@ -14,6 +14,7 @@ final class ScannerViewModel {
     var error: Error?
     var searchQuery = ""
     var searchResults: [FileNode] = []
+    var treeMutationRevision = 0
 
     // MARK: - Private
 
@@ -153,19 +154,37 @@ final class ScannerViewModel {
         FileOperationsService.revealInFinder(node.path)
     }
 
-    func moveToTrash(_ node: FileNode) {
+    @discardableResult
+    func beginMoveToTrash(_ node: FileNode) -> Bool {
+        error = nil
+
         do {
             try FileOperationsService.moveToTrash(node.path)
-            removeNodeFromTree(node)
+            return true
         } catch {
             self.error = error
+            return false
         }
     }
 
+    func commitMoveToTrash(_ node: FileNode) {
+        commitNodeRemoval(node)
+    }
+
+    func moveToTrash(_ node: FileNode) {
+        guard beginMoveToTrash(node) else {
+            return
+        }
+
+        commitMoveToTrash(node)
+    }
+
     func deleteFile(_ node: FileNode) {
+        error = nil
+
         do {
             try FileOperationsService.delete(node.path)
-            removeNodeFromTree(node)
+            commitNodeRemoval(node)
         } catch {
             self.error = error
         }
@@ -185,24 +204,41 @@ final class ScannerViewModel {
 
     // MARK: - Private Helpers
 
-    private func removeNodeFromTree(_ node: FileNode) {
+    private func commitNodeRemoval(_ node: FileNode) {
+        pruneSearchResults(removing: node)
+
+        if rootNode?.id == node.id {
+            rootNode = nil
+            currentNode = nil
+            navigationStack = []
+            searchQuery = ""
+            searchResults = []
+            treeMutationRevision += 1
+            return
+        }
+
         guard let parent = findParent(of: node, in: rootNode) else { return }
 
         if var children = parent.children {
             children.removeAll { $0.id == node.id }
             parent.children = children
-
-            // Update sizes up the tree
-            updateSizes(from: parent)
         }
 
-        // If we removed the current node, navigate to parent
-        if currentNode?.id == node.id {
-            currentNode = parent
-            if let lastIndex = navigationStack.lastIndex(where: { $0.id == node.id }) {
-                navigationStack.remove(at: lastIndex)
+        updateSizes(from: parent)
+
+        if let currentNode, node.containsNode(withID: currentNode.id) {
+            navigationStack.removeAll { node.containsNode(withID: $0.id) }
+
+            if navigationStack.isEmpty, let rootNode {
+                navigationStack = [rootNode]
             }
+
+            self.currentNode = navigationStack.last ?? parent
+            searchQuery = ""
+            searchResults = []
         }
+
+        treeMutationRevision += 1
     }
 
     private func findParent(of node: FileNode, in root: FileNode?) -> FileNode? {
@@ -228,5 +264,9 @@ final class ScannerViewModel {
         if let parent = findParent(of: node, in: rootNode) {
             updateSizes(from: parent)
         }
+    }
+
+    private func pruneSearchResults(removing node: FileNode) {
+        searchResults.removeAll { node.containsNode(withID: $0.id) }
     }
 }

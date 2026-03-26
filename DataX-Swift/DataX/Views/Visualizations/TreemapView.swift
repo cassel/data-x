@@ -5,6 +5,9 @@ struct TreemapView: View {
     let node: FileNode
     let highlightedNode: FileNode?  // From file tree selection
     let onSelect: (FileNode) -> Void
+    let layoutRevision: Int
+    let onMoveToTrash: (FileNode) -> Bool
+    let onCommitMoveToTrash: (FileNode) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var cachedRects: [TreemapRect] = []
@@ -12,6 +15,7 @@ struct TreemapView: View {
     @State private var lastMouseLocation: CGPoint?
     @State private var lastUpdateTime: Date = .distantPast
     @State private var pulseExpanded = false
+    @State private var deletionAnimation: TreemapDeletionAnimation?
     @State private var zoomState = VisualizationZoomState()
     @GestureState private var zoomGesture = VisualizationZoomGestureState()
 
@@ -25,11 +29,19 @@ struct TreemapView: View {
 
     // Combined: hover takes priority, otherwise use highlighted from tree
     private var effectiveHighlight: FileNode? {
-        hoveredNode ?? highlightedNode
+        let candidate = hoveredNode ?? highlightedNode
+
+        guard let candidate,
+              !isAnimatingRemoval(for: candidate) else {
+            return nil
+        }
+
+        return candidate
     }
 
     private var pulseTargetRect: TreemapRect? {
-        TreemapPulsePolicy.largestVisibleTopLevelRect(in: cachedRects)
+        guard deletionAnimation == nil else { return nil }
+        return TreemapPulsePolicy.largestVisibleTopLevelRect(in: cachedRects)
     }
 
     private var shouldRenderPulse: Bool {
@@ -37,7 +49,7 @@ struct TreemapView: View {
             reduceMotion: accessibilityReduceMotion,
             hasHover: hoveredNode != nil,
             hasHighlight: highlightedNode != nil
-        )
+        ) && deletionAnimation == nil
     }
 
     private var currentPulseScale: CGFloat {
@@ -87,18 +99,13 @@ struct TreemapView: View {
                 Color(nsColor: .windowBackgroundColor)
 
                 // Static treemap layer - rasterized for performance
-                Canvas { context, size in
-                    drawTreemapStatic(context: &context, size: size)
-                }
-                .drawingGroup()
+                mainTreemapLayer()
 
                 // Hover overlay - lightweight
-                Canvas { context, size in
-                    drawHoverOverlay(context: context, size: size)
-                }
+                hoverOverlayLayer()
 
                 // Click handling
-                interactionLayer()
+                interactionLayer(viewSize: geometry.size)
             }
             .background(
                 MouseTracker { location in
@@ -121,10 +128,15 @@ struct TreemapView: View {
             }
             .onChange(of: node.id) { _, _ in
                 resetZoom(animated: false)
+                deletionAnimation = nil
                 hoveredNode = nil
                 lastMouseLocation = nil
                 lastUpdateTime = .distantPast
                 buildCache(size: geometry.size)
+            }
+            .onChange(of: layoutRevision) { _, _ in
+                buildCache(size: geometry.size)
+                refreshHoveredNode(in: geometry.size)
             }
             .onChange(of: accessibilityReduceMotion) { _, _ in
                 configurePulseAnimation()
@@ -142,11 +154,16 @@ struct TreemapView: View {
     // MARK: - Mouse Handling
 
     private func handleMouseMove(_ location: CGPoint?, in viewSize: CGSize) {
+        lastMouseLocation = location
+
+        guard deletionAnimation == nil else {
+            hoveredNode = nil
+            return
+        }
+
         let now = Date()
         guard now.timeIntervalSince(lastUpdateTime) >= throttleInterval else { return }
         lastUpdateTime = now
-
-        lastMouseLocation = location
 
         if let location {
             let contentPoint = VisualizationZoomState.contentPoint(
@@ -162,6 +179,11 @@ struct TreemapView: View {
     }
 
     private func refreshHoveredNode(in viewSize: CGSize) {
+        guard deletionAnimation == nil else {
+            hoveredNode = nil
+            return
+        }
+
         guard let lastMouseLocation else {
             hoveredNode = nil
             return
@@ -179,12 +201,16 @@ struct TreemapView: View {
     // MARK: - Cache
 
     private func buildCache(size: CGSize) {
+        guard deletionAnimation == nil else { return }
         guard size.width > 0 && size.height > 0 else { return }
 
-        // Adaptive max rects based on view size
+        cachedRects = layoutRects(for: node, size: size)
+    }
+
+    private func layoutRects(for node: FileNode, size: CGSize) -> [TreemapRect] {
         let maxRects = min(8000, Int(size.width * size.height / 50))
 
-        cachedRects = TreemapLayout.layout(
+        return TreemapLayout.layout(
             node: node,
             bounds: CGRect(origin: .zero, size: size),
             depth: 0,
@@ -207,36 +233,89 @@ struct TreemapView: View {
 
     // MARK: - Static Drawing
 
-    private func drawTreemapStatic(context: inout GraphicsContext, size: CGSize) {
+    @ViewBuilder
+    private func mainTreemapLayer() -> some View {
+        if deletionAnimation != nil {
+            TimelineView(.animation) { timeline in
+                Canvas { context, size in
+                    drawTreemapStatic(context: &context, size: size, at: timeline.date)
+                }
+                .drawingGroup()
+            }
+        } else {
+            Canvas { context, size in
+                drawTreemapStatic(context: &context, size: size)
+            }
+            .drawingGroup()
+        }
+    }
+
+    @ViewBuilder
+    private func hoverOverlayLayer() -> some View {
+        if deletionAnimation != nil {
+            TimelineView(.animation) { timeline in
+                Canvas { context, size in
+                    drawHoverOverlay(context: context, size: size, at: timeline.date)
+                }
+            }
+        } else {
+            Canvas { context, size in
+                drawHoverOverlay(context: context, size: size)
+            }
+        }
+    }
+
+    private func drawTreemapStatic(context: inout GraphicsContext, size: CGSize, at date: Date? = nil) {
         applyZoomTransform(to: &context, size: size)
+
+        if let deletionAnimation {
+            for renderedRect in renderedRects(for: deletionAnimation, at: date ?? .now) {
+                drawStaticRect(
+                    renderedRect.rect,
+                    pulseScale: 1,
+                    opacity: renderedRect.opacity,
+                    context: &context
+                )
+            }
+            return
+        }
+
         let pulseTargetID = pulseTargetRect?.id
 
         for rect in cachedRects {
             guard rect.id != pulseTargetID else { continue }
-            drawStaticRect(rect, pulseScale: 1, context: &context)
+            drawStaticRect(rect, pulseScale: 1, opacity: 1, context: &context)
         }
 
         if let pulseTargetRect, shouldRenderPulse {
-            drawStaticRect(pulseTargetRect, pulseScale: currentPulseScale, context: &context)
+            drawStaticRect(pulseTargetRect, pulseScale: currentPulseScale, opacity: 1, context: &context)
         } else if let pulseTargetRect {
-            drawStaticRect(pulseTargetRect, pulseScale: 1, context: &context)
+            drawStaticRect(pulseTargetRect, pulseScale: 1, opacity: 1, context: &context)
         }
     }
 
-    private func drawStaticRect(_ rect: TreemapRect, pulseScale: CGFloat, context: inout GraphicsContext) {
+    private func drawStaticRect(
+        _ rect: TreemapRect,
+        pulseScale: CGFloat,
+        opacity: Double,
+        context: inout GraphicsContext
+    ) {
         let padding: CGFloat = rect.depth == 0 ? 1.0 : 0.5
         let insetRect = rect.cgRect.insetBy(dx: padding, dy: padding)
-        guard insetRect.width > 0.5 && insetRect.height > 0.5 else { return }
+        guard opacity > 0.01, insetRect.width > 0.5 && insetRect.height > 0.5 else { return }
 
         let cornerRadius: CGFloat = rect.depth == 0 ? 2 : 1
         let path = Path(roundedRect: insetRect, cornerRadius: cornerRadius)
 
-        if pulseScale > 1 {
+        if pulseScale > 1 || opacity < 0.999 {
             context.drawLayer { layer in
+                layer.opacity = opacity
                 let center = CGPoint(x: insetRect.midX, y: insetRect.midY)
-                layer.translateBy(x: center.x, y: center.y)
-                layer.scaleBy(x: pulseScale, y: pulseScale)
-                layer.translateBy(x: -center.x, y: -center.y)
+                if pulseScale > 1 {
+                    layer.translateBy(x: center.x, y: center.y)
+                    layer.scaleBy(x: pulseScale, y: pulseScale)
+                    layer.translateBy(x: -center.x, y: -center.y)
+                }
                 drawRectFillAndBorder(rect, path: path, context: &layer)
             }
         } else {
@@ -258,19 +337,21 @@ struct TreemapView: View {
 
     // MARK: - Hover Overlay
 
-    private func drawHoverOverlay(context: GraphicsContext, size: CGSize) {
+    private func drawHoverOverlay(context: GraphicsContext, size: CGSize, at date: Date? = nil) {
         guard let highlighted = effectiveHighlight else { return }
-        guard let highlightedRect = cachedRects.first(where: { $0.node.id == highlighted.id }) else { return }
+
+        let activeRects = activeRects(at: date)
+        guard let highlightedRect = activeRects.first(where: { $0.id == highlighted.id }) else { return }
 
         var context = context
         applyZoomTransform(to: &context, size: size)
 
         // Find top-level parent
-        let parentRect = findTopLevelParent(of: highlightedRect)
+        let parentRect = findTopLevelParent(of: highlightedRect, in: activeRects)
 
         // Dim non-parent areas
         if let parent = parentRect {
-            for rect in cachedRects where rect.depth == 0 && rect.id != parent.id {
+            for rect in activeRects where rect.depth == 0 && rect.id != parent.id {
                 let path = Path(roundedRect: rect.cgRect.insetBy(dx: 1, dy: 1), cornerRadius: 2)
                 context.fill(path, with: .color(.black.opacity(0.5)))
             }
@@ -287,6 +368,114 @@ struct TreemapView: View {
         context.stroke(highlightedPath, with: .color(borderColor), lineWidth: 2)
     }
 
+    private func activeRects(at date: Date? = nil) -> [TreemapRect] {
+        guard let deletionAnimation else { return cachedRects }
+        return renderedRects(for: deletionAnimation, at: date ?? .now).map(\.rect)
+    }
+
+    private func renderedRects(for animation: TreemapDeletionAnimation, at date: Date) -> [RenderedTreemapRect] {
+        let deletedProgress = animation.motion.deletedRectProgress(at: date.timeIntervalSince(animation.startedAt))
+        let survivingProgress = animation.motion.survivingRectProgress(at: date.timeIntervalSince(animation.startedAt))
+        var renderedRects: [RenderedTreemapRect] = []
+        renderedRects.reserveCapacity(max(animation.sourceRects.count, animation.destinationRects.count))
+
+        for sourceRect in animation.sourceRects {
+            if animation.deletedNodeIDs.contains(sourceRect.id) {
+                let collapseCenter = sourceRect.id == animation.targetRect.id
+                    ? sourceRect.center
+                    : animation.targetRect.center
+                renderedRects.append(
+                    RenderedTreemapRect(
+                        rect: collapse(rect: sourceRect, toward: collapseCenter, progress: deletedProgress),
+                        opacity: 1 - deletedProgress
+                    )
+                )
+                continue
+            }
+
+            if let destinationRect = animation.destinationRectsByID[sourceRect.id] {
+                renderedRects.append(
+                    RenderedTreemapRect(
+                        rect: interpolate(from: sourceRect, to: destinationRect, progress: survivingProgress),
+                        opacity: 1
+                    )
+                )
+            } else {
+                renderedRects.append(
+                    RenderedTreemapRect(
+                        rect: collapse(rect: sourceRect, toward: sourceRect.center, progress: deletedProgress),
+                        opacity: 1 - deletedProgress
+                    )
+                )
+            }
+        }
+
+        for destinationRect in animation.destinationRects where !animation.sourceRectIDs.contains(destinationRect.id) {
+            renderedRects.append(
+                RenderedTreemapRect(
+                    rect: interpolate(
+                        from: collapsedRect(for: destinationRect, around: animation.targetRect.center),
+                        to: destinationRect,
+                        progress: survivingProgress
+                    ),
+                    opacity: animation.motion.appearingRectOpacity(for: date.timeIntervalSince(animation.startedAt))
+                )
+            )
+        }
+
+        return renderedRects
+    }
+
+    private func interpolate(from start: TreemapRect, to end: TreemapRect, progress: Double) -> TreemapRect {
+        let x = start.x + (end.x - start.x) * progress
+        let y = start.y + (end.y - start.y) * progress
+        let width = start.width + (end.width - start.width) * progress
+        let height = start.height + (end.height - start.height) * progress
+
+        return TreemapRect(
+            id: end.id,
+            x: x,
+            y: y,
+            width: max(0, width),
+            height: max(0, height),
+            node: end.node,
+            depth: end.depth,
+            color: end.color
+        )
+    }
+
+    private func collapse(rect: TreemapRect, toward center: CGPoint, progress: Double) -> TreemapRect {
+        let scale = max(0, 1 - progress)
+        let interpolatedCenter = CGPoint(
+            x: rect.center.x + (center.x - rect.center.x) * progress,
+            y: rect.center.y + (center.y - rect.center.y) * progress
+        )
+
+        return TreemapRect(
+            id: rect.id,
+            x: Double(interpolatedCenter.x) - rect.width * scale / 2,
+            y: Double(interpolatedCenter.y) - rect.height * scale / 2,
+            width: rect.width * scale,
+            height: rect.height * scale,
+            node: rect.node,
+            depth: rect.depth,
+            color: rect.color
+        )
+    }
+
+    private func collapsedRect(for rect: TreemapRect, around center: CGPoint) -> TreemapRect {
+        TreemapRect(
+            id: rect.id,
+            x: center.x,
+            y: center.y,
+            width: 0,
+            height: 0,
+            node: rect.node,
+            depth: rect.depth,
+            color: rect.color
+        )
+    }
+
     private func applyZoomTransform(to context: inout GraphicsContext, size: CGSize) {
         let scale = effectiveZoomScale
         guard abs(scale - 1) > 0.0001 else { return }
@@ -297,9 +486,9 @@ struct TreemapView: View {
         context.translateBy(x: -anchorPoint.x, y: -anchorPoint.y)
     }
 
-    private func findTopLevelParent(of rect: TreemapRect) -> TreemapRect? {
+    private func findTopLevelParent(of rect: TreemapRect, in rects: [TreemapRect]) -> TreemapRect? {
         if rect.depth == 0 { return rect }
-        return cachedRects.first { $0.depth == 0 && $0.contains(rect.center) }
+        return rects.first { $0.depth == 0 && $0.contains(rect.center) }
     }
 
     private func configurePulseAnimation() {
@@ -321,12 +510,15 @@ struct TreemapView: View {
     }
 
     private func handlePrimaryTap() {
+        guard deletionAnimation == nil else { return }
+
         if let hoveredNode, hoveredNode.isDirectory {
             onSelect(hoveredNode)
         }
     }
 
     private func handleResetTap() {
+        guard deletionAnimation == nil else { return }
         guard zoomState.canReset else { return }
         resetZoom(animated: true)
     }
@@ -347,11 +539,14 @@ struct TreemapView: View {
     }
 
     @ViewBuilder
-    private func interactionLayer() -> some View {
+    private func interactionLayer(viewSize: CGSize) -> some View {
         let surface = Color.clear
             .contentShape(Rectangle())
             .onTapGesture {
                 handlePrimaryTap()
+            }
+            .contextMenu {
+                contextMenuItems(viewSize: viewSize)
             }
 
         if zoomState.canReset {
@@ -362,6 +557,74 @@ struct TreemapView: View {
         } else {
             surface
         }
+    }
+
+    @ViewBuilder
+    private func contextMenuItems(viewSize: CGSize) -> some View {
+        if deletionAnimation != nil {
+            Label("Deletion In Progress", systemImage: "hourglass")
+        } else if let hoveredNode {
+            Button(role: .destructive) {
+                beginAnimatedTrash(for: hoveredNode, in: viewSize)
+            } label: {
+                Label("Move to Trash", systemImage: "trash")
+            }
+        } else {
+            Button(role: .destructive) {} label: {
+                Label("Move to Trash", systemImage: "trash")
+            }
+            .disabled(true)
+
+            Text("Hover a file or folder first")
+        }
+    }
+
+    private func beginAnimatedTrash(for target: FileNode, in viewSize: CGSize) {
+        guard deletionAnimation == nil else { return }
+        guard onMoveToTrash(target) else { return }
+
+        guard let animation = makeDeletionAnimation(for: target, in: viewSize) else {
+            hoveredNode = nil
+            lastMouseLocation = nil
+            onCommitMoveToTrash(target)
+            buildCache(size: viewSize)
+            return
+        }
+
+        hoveredNode = nil
+        deletionAnimation = animation
+        scheduleDeletionCommit(for: animation)
+    }
+
+    private func makeDeletionAnimation(for target: FileNode, in viewSize: CGSize) -> TreemapDeletionAnimation? {
+        guard let targetRect = cachedRects.first(where: { $0.id == target.id }) else { return nil }
+        guard let previewNode = node.clonedSubtree(removingNodeWithID: target.id) else { return nil }
+
+        return TreemapDeletionAnimation(
+            targetNode: target,
+            targetRect: targetRect,
+            sourceRects: cachedRects,
+            destinationRects: layoutRects(for: previewNode, size: viewSize),
+            startedAt: .now,
+            reduceMotion: accessibilityReduceMotion
+        )
+    }
+
+    private func scheduleDeletionCommit(for animation: TreemapDeletionAnimation) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + animation.motion.totalDuration) {
+            if deletionAnimation?.token == animation.token {
+                cachedRects = animation.destinationRects
+                deletionAnimation = nil
+                hoveredNode = nil
+                lastMouseLocation = nil
+            }
+
+            onCommitMoveToTrash(animation.targetNode)
+        }
+    }
+
+    private func isAnimatingRemoval(for node: FileNode) -> Bool {
+        deletionAnimation?.targetNode.containsNode(withID: node.id) == true
     }
 
     // MARK: - Labels
@@ -407,6 +670,87 @@ struct TreemapView: View {
             )
             layer.draw(text, at: point, anchor: .leading)
         }
+    }
+}
+
+private struct RenderedTreemapRect {
+    let rect: TreemapRect
+    let opacity: Double
+}
+
+private struct TreemapDeletionAnimation {
+    let token = UUID()
+    let targetNode: FileNode
+    let targetRect: TreemapRect
+    let sourceRects: [TreemapRect]
+    let sourceRectIDs: Set<UUID>
+    let destinationRects: [TreemapRect]
+    let destinationRectsByID: [UUID: TreemapRect]
+    let deletedNodeIDs: Set<UUID>
+    let startedAt: Date
+    let motion: TreemapDeletionMotionPolicy
+
+    init(
+        targetNode: FileNode,
+        targetRect: TreemapRect,
+        sourceRects: [TreemapRect],
+        destinationRects: [TreemapRect],
+        startedAt: Date,
+        reduceMotion: Bool
+    ) {
+        self.targetNode = targetNode
+        self.targetRect = targetRect
+        self.sourceRects = sourceRects
+        self.sourceRectIDs = Set(sourceRects.map(\.id))
+        self.destinationRects = destinationRects
+        self.destinationRectsByID = Dictionary(uniqueKeysWithValues: destinationRects.map { ($0.id, $0) })
+        self.deletedNodeIDs = Set(sourceRects.map(\.id).filter { targetNode.containsNode(withID: $0) })
+        self.startedAt = startedAt
+        self.motion = TreemapDeletionMotionPolicy(reduceMotion: reduceMotion)
+    }
+}
+
+private struct TreemapDeletionMotionPolicy {
+    let reduceMotion: Bool
+
+    var collapseDuration: TimeInterval {
+        reduceMotion ? 0.18 : 0.3
+    }
+
+    var totalDuration: TimeInterval {
+        reduceMotion ? 0.22 : 0.42
+    }
+
+    func deletedRectProgress(at elapsed: TimeInterval) -> Double {
+        let t = normalized(elapsed, over: collapseDuration)
+        return reduceMotion ? easeOut(t) : easeIn(t)
+    }
+
+    func survivingRectProgress(at elapsed: TimeInterval) -> Double {
+        let t = normalized(elapsed, over: totalDuration)
+        let eased = easeOut(t)
+
+        guard !reduceMotion else { return eased }
+
+        let overshoot = sin(t * .pi) * (1 - t) * 0.06
+        return min(max(eased + overshoot, 0), 1.04)
+    }
+
+    func appearingRectOpacity(for elapsed: TimeInterval) -> Double {
+        min(1, survivingRectProgress(at: elapsed))
+    }
+
+    private func normalized(_ elapsed: TimeInterval, over duration: TimeInterval) -> Double {
+        guard duration > 0 else { return 1 }
+        return min(max(elapsed / duration, 0), 1)
+    }
+
+    private func easeIn(_ t: Double) -> Double {
+        t * t * t
+    }
+
+    private func easeOut(_ t: Double) -> Double {
+        1 - pow(1 - t, 3)
     }
 }
 
@@ -615,6 +959,13 @@ struct MouseTracker: NSViewRepresentable {
 }
 
 #Preview {
-    TreemapView(node: FileNode(url: URL(fileURLWithPath: "/"), isDirectory: true), highlightedNode: nil) { _ in }
-        .frame(width: 600, height: 400)
+    TreemapView(
+        node: FileNode(url: URL(fileURLWithPath: "/"), isDirectory: true),
+        highlightedNode: nil,
+        onSelect: { _ in },
+        layoutRevision: 0,
+        onMoveToTrash: { _ in true },
+        onCommitMoveToTrash: { _ in }
+    )
+    .frame(width: 600, height: 400)
 }
