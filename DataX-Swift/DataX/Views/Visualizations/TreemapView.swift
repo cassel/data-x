@@ -6,19 +6,39 @@ struct TreemapView: View {
     let highlightedNode: FileNode?  // From file tree selection
     let onSelect: (FileNode) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var cachedRects: [TreemapRect] = []
     @State private var hoveredNode: FileNode?
     @State private var lastUpdateTime: Date = .distantPast
+    @State private var pulseExpanded = false
 
     private let maxDepth = 6
     private let throttleInterval: TimeInterval = 0.016 // ~60fps
     private let labelShadowColor = Color.black.opacity(0.35)
     private let labelShadowRadius: CGFloat = 1.5
     private let labelShadowYOffset: CGFloat = 1
+    private let pulseScaleMax: CGFloat = 1.02
+    private let pulseAnimation = Animation.easeInOut(duration: 2).repeatForever(autoreverses: true)
 
     // Combined: hover takes priority, otherwise use highlighted from tree
     private var effectiveHighlight: FileNode? {
         hoveredNode ?? highlightedNode
+    }
+
+    private var pulseTargetRect: TreemapRect? {
+        TreemapPulsePolicy.largestVisibleTopLevelRect(in: cachedRects)
+    }
+
+    private var shouldRenderPulse: Bool {
+        TreemapPulsePolicy.shouldRenderPulse(
+            reduceMotion: accessibilityReduceMotion,
+            hasHover: hoveredNode != nil,
+            hasHighlight: highlightedNode != nil
+        )
+    }
+
+    private var currentPulseScale: CGFloat {
+        shouldRenderPulse && pulseExpanded ? pulseScaleMax : 1
     }
 
     var body: some View {
@@ -59,12 +79,16 @@ struct TreemapView: View {
             }
             .onAppear {
                 buildCache(size: geometry.size)
+                configurePulseAnimation()
             }
             .onChange(of: geometry.size) { _, newSize in
                 buildCache(size: newSize)
             }
             .onChange(of: node.id) { _, _ in
                 buildCache(size: geometry.size)
+            }
+            .onChange(of: accessibilityReduceMotion) { _, _ in
+                configurePulseAnimation()
             }
         }
     }
@@ -115,26 +139,50 @@ struct TreemapView: View {
     // MARK: - Static Drawing
 
     private func drawTreemapStatic(context: inout GraphicsContext) {
+        let pulseTargetID = pulseTargetRect?.id
+
         for rect in cachedRects {
-            let padding: CGFloat = rect.depth == 0 ? 1.0 : 0.5
-            let insetRect = rect.cgRect.insetBy(dx: padding, dy: padding)
-            guard insetRect.width > 0.5 && insetRect.height > 0.5 else { continue }
+            guard rect.id != pulseTargetID else { continue }
+            drawStaticRect(rect, pulseScale: 1, context: &context)
+        }
 
-            let cornerRadius: CGFloat = rect.depth == 0 ? 2 : 1
-            let path = Path(roundedRect: insetRect, cornerRadius: cornerRadius)
+        if let pulseTargetRect, shouldRenderPulse {
+            drawStaticRect(pulseTargetRect, pulseScale: currentPulseScale, context: &context)
+        } else if let pulseTargetRect {
+            drawStaticRect(pulseTargetRect, pulseScale: 1, context: &context)
+        }
+    }
 
-            // Use pre-computed color
-            context.fill(path, with: .color(rect.color))
+    private func drawStaticRect(_ rect: TreemapRect, pulseScale: CGFloat, context: inout GraphicsContext) {
+        let padding: CGFloat = rect.depth == 0 ? 1.0 : 0.5
+        let insetRect = rect.cgRect.insetBy(dx: padding, dy: padding)
+        guard insetRect.width > 0.5 && insetRect.height > 0.5 else { return }
 
-            // Border for depth 0-1
-            if rect.depth < 2 {
-                context.stroke(path, with: .color(.black.opacity(0.2)), lineWidth: 0.5)
+        let cornerRadius: CGFloat = rect.depth == 0 ? 2 : 1
+        let path = Path(roundedRect: insetRect, cornerRadius: cornerRadius)
+
+        if pulseScale > 1 {
+            context.drawLayer { layer in
+                let center = CGPoint(x: insetRect.midX, y: insetRect.midY)
+                layer.translateBy(x: center.x, y: center.y)
+                layer.scaleBy(x: pulseScale, y: pulseScale)
+                layer.translateBy(x: -center.x, y: -center.y)
+                drawRectFillAndBorder(rect, path: path, context: &layer)
             }
+        } else {
+            drawRectFillAndBorder(rect, path: path, context: &context)
+        }
 
-            // Labels for depth 0
-            if rect.depth == 0 && insetRect.width > 50 && insetRect.height > 25 {
-                drawLabel(rect, context: &context, insetRect: insetRect)
-            }
+        if rect.depth == 0 && insetRect.width > 50 && insetRect.height > 25 {
+            drawLabel(rect, context: &context, insetRect: insetRect)
+        }
+    }
+
+    private func drawRectFillAndBorder(_ rect: TreemapRect, path: Path, context: inout GraphicsContext) {
+        context.fill(path, with: .color(rect.color))
+
+        if rect.depth < 2 {
+            context.stroke(path, with: .color(.black.opacity(0.2)), lineWidth: 0.5)
         }
     }
 
@@ -169,6 +217,24 @@ struct TreemapView: View {
     private func findTopLevelParent(of rect: TreemapRect) -> TreemapRect? {
         if rect.depth == 0 { return rect }
         return cachedRects.first { $0.depth == 0 && $0.contains(rect.center) }
+    }
+
+    private func configurePulseAnimation() {
+        guard !accessibilityReduceMotion else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                pulseExpanded = false
+            }
+            return
+        }
+
+        guard !pulseExpanded else { return }
+
+        pulseExpanded = false
+        withAnimation(pulseAnimation) {
+            pulseExpanded = true
+        }
     }
 
     // MARK: - Labels
@@ -214,6 +280,19 @@ struct TreemapView: View {
             )
             layer.draw(text, at: point, anchor: .leading)
         }
+    }
+}
+
+struct TreemapPulsePolicy {
+    static func largestVisibleTopLevelRect(in rects: [TreemapRect]) -> TreemapRect? {
+        rects
+            .lazy
+            .filter { $0.depth == 0 && $0.area > 0 }
+            .max { $0.area < $1.area }
+    }
+
+    static func shouldRenderPulse(reduceMotion: Bool, hasHover: Bool, hasHighlight: Bool) -> Bool {
+        !reduceMotion && !hasHover && !hasHighlight
     }
 }
 
