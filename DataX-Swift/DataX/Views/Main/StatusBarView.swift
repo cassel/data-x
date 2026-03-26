@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 
 struct StatusBarView: View {
@@ -64,6 +65,8 @@ struct StatusBarView: View {
                         .foregroundColor(.secondary)
                 }
             }
+
+            StatusBarTrendSection(path: node.path.path)
         }
     }
 
@@ -107,6 +110,61 @@ struct StatusBarView: View {
             return .orange
         } else {
             return .accentColor
+        }
+    }
+}
+
+private struct StatusBarTrendSection: View {
+    let path: String
+
+    @Query private var records: [ScanRecord]
+
+    init(path: String) {
+        self.path = path
+
+        let rootPath = path
+        _records = Query(
+            filter: #Predicate<ScanRecord> { record in
+                record.rootPath == rootPath
+            },
+            sort: [SortDescriptor(\ScanRecord.timestamp, order: .reverse)]
+        )
+    }
+
+    private var separator: some View {
+        Circle()
+            .fill(Color.secondary.opacity(0.3))
+            .frame(width: 3, height: 3)
+    }
+
+    var body: some View {
+        if let summary = ScanTrendSummaryBuilder.summary(from: records, matchingRootPath: path) {
+            HStack(spacing: 12) {
+                separator
+
+                HStack(spacing: 8) {
+                    TrendSparkline(points: summary.points)
+                        .accessibilityValue(summary.accessibilityValue)
+
+                    Text(summary.formattedDeltaText)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(deltaColor(for: summary.deltaDirection))
+                        .lineLimit(1)
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func deltaColor(for direction: ScanTrendDirection) -> Color {
+        switch direction {
+        case .growth:
+            .red
+        case .reduction:
+            .green
+        case .neutral:
+            .secondary
         }
     }
 }
@@ -343,10 +401,89 @@ struct ScanProgressMotionPolicy {
     }
 }
 
+@MainActor
+private enum StatusBarPreviewData {
+    static func makeAppState() -> AppState {
+        let appState = AppState()
+        let root = FileNode(url: URL(fileURLWithPath: "/Users/cassel/Projects/Data-X"), isDirectory: true)
+        let docs = FileNode(url: URL(fileURLWithPath: "/Users/cassel/Projects/Data-X/docs"), isDirectory: true)
+        docs.size = 1_024 * 1_024 * 3
+        docs.fileCount = 12
+
+        let readme = FileNode(
+            url: URL(fileURLWithPath: "/Users/cassel/Projects/Data-X/README.md"),
+            isDirectory: false,
+            size: 1_024 * 120
+        )
+
+        root.children = [docs, readme]
+        root.size = docs.size + readme.size
+        root.fileCount = docs.fileCount + readme.fileCount
+
+        appState.scannerViewModel.rootNode = root
+        appState.scannerViewModel.currentNode = root
+        appState.scannerViewModel.navigationStack = [root]
+        appState.scannerViewModel.diskInfo = DiskInfo(
+            totalSpace: 512 * 1_024 * 1_024 * 1_024,
+            usedSpace: 356 * 1_024 * 1_024 * 1_024,
+            freeSpace: 156 * 1_024 * 1_024 * 1_024,
+            volumeName: "Macintosh HD",
+            volumePath: URL(fileURLWithPath: "/")
+        )
+        return appState
+    }
+
+    static func makeModelContainer() -> ModelContainer {
+        let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try! ModelContainer(for: ScanRecord.self, configurations: configuration)
+        let context = ModelContext(container)
+        let rootPath = "/Users/cassel/Projects/Data-X"
+        let sizes: [UInt64] = [
+            5_100_000_000,
+            5_400_000_000,
+            5_650_000_000,
+            6_050_000_000
+        ]
+
+        for (index, size) in sizes.enumerated() {
+            context.insert(
+                ScanRecord(
+                    rootPath: rootPath,
+                    timestamp: Date(timeIntervalSince1970: TimeInterval(1_700_000_000 + index * 3_600)),
+                    totalSize: size,
+                    duration: 2,
+                    fileCount: 120,
+                    dirCount: 18,
+                    topChildrenJSON: "[]"
+                )
+            )
+        }
+
+        context.insert(
+            ScanRecord(
+                rootPath: "/Users/cassel/Projects/Data-X/docs",
+                timestamp: Date(timeIntervalSince1970: 1_700_010_000),
+                totalSize: 2_200_000_000,
+                duration: 1,
+                fileCount: 40,
+                dirCount: 6,
+                topChildrenJSON: "[]"
+            )
+        )
+
+        try! context.save()
+        return container
+    }
+}
+
 #Preview {
+    let appState = StatusBarPreviewData.makeAppState()
+    let container = StatusBarPreviewData.makeModelContainer()
+
     VStack {
         StatusBarView()
     }
-    .environment(AppState())
+    .environment(appState)
+    .modelContainer(container)
     .frame(width: 800, height: 100)
 }
