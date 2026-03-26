@@ -3,11 +3,18 @@ import SwiftData
 
 @main
 struct DataXApp: App {
-    @State private var appState = AppState()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    private let appState: AppState
+
+    init() {
+        let appState = AppState()
+        self.appState = appState
+        appDelegate.configure(appState: appState)
+    }
 
     var body: some Scene {
         WindowGroup(id: AppState.mainWindowID) {
-            ContentView()
+            MainWindowRootView()
                 .environment(appState)
                 .frame(minWidth: 900, minHeight: 600)
         }
@@ -78,6 +85,20 @@ struct DataXApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
+    }
+}
+
+private struct MainWindowRootView: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        ContentView()
+            .task {
+                appState.installMainWindowBridge {
+                    openWindow(id: AppState.mainWindowID)
+                }
+            }
     }
 }
 

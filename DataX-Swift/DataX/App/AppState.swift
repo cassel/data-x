@@ -26,15 +26,32 @@ enum FolderIntake {
 final class AppState {
     static let mainWindowID = "main"
 
-    var scannerViewModel = ScannerViewModel()
-    var filterViewModel = FilterViewModel()
-    var sshViewModel = SSHViewModel()
+    var scannerViewModel: ScannerViewModel
+    var filterViewModel: FilterViewModel
+    var sshViewModel: SSHViewModel
     var showFolderPicker = false
     var showHistoryPanel = false
     var selectedVisualization: VisualizationType = .treemap
     var lastScannedURL: URL?
     var highlightedNode: FileNode?  // Selected in tree, highlighted in treemap (not navigated)
     @ObservationIgnored private var activeSecurityScopedDirectory: URL?
+    @ObservationIgnored private let activateApplication: () -> Void
+    @ObservationIgnored private var openMainWindowBridge: (() -> Void)?
+    @ObservationIgnored private(set) var pendingFinderServiceDirectory: URL?
+
+    init(
+        scannerViewModel: ScannerViewModel? = nil,
+        filterViewModel: FilterViewModel? = nil,
+        sshViewModel: SSHViewModel? = nil,
+        activateApplication: (() -> Void)? = nil
+    ) {
+        self.scannerViewModel = scannerViewModel ?? ScannerViewModel()
+        self.filterViewModel = filterViewModel ?? FilterViewModel()
+        self.sshViewModel = sshViewModel ?? SSHViewModel()
+        self.activateApplication = activateApplication ?? {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
 
     var hasScannedContent: Bool {
         scannerViewModel.rootNode != nil
@@ -113,9 +130,40 @@ final class AppState {
         _ = handleFolderIntake(urls)
     }
 
+    func installMainWindowBridge(_ bridge: @escaping () -> Void) {
+        openMainWindowBridge = bridge
+        flushPendingFinderServiceDirectoryIfNeeded()
+    }
+
+    func handleFinderServiceDirectory(_ directory: URL) {
+        guard let directory = FolderIntake.scannableDirectory(from: directory) else { return }
+
+        guard openMainWindowBridge != nil else {
+            pendingFinderServiceDirectory = directory
+            return
+        }
+
+        deliverFinderServiceDirectory(directory)
+    }
+
     func scan(directory: URL) {
         lastScannedURL = directory
         scannerViewModel.scan(directory: directory)
+    }
+
+    private func flushPendingFinderServiceDirectoryIfNeeded() {
+        guard let pendingFinderServiceDirectory else { return }
+        deliverFinderServiceDirectory(pendingFinderServiceDirectory)
+    }
+
+    private func deliverFinderServiceDirectory(_ directory: URL) {
+        let standardizedDirectory = directory.standardizedFileURL
+
+        pendingFinderServiceDirectory = nil
+        openMainWindowBridge?()
+        activateApplication()
+        showFolderPicker = false
+        _ = handleFolderIntake([standardizedDirectory])
     }
 
     private func updateSecurityScopedDirectory(for directory: URL) {

@@ -31,6 +31,16 @@ targets:
         LSApplicationCategoryType: public.app-category.utilities
         NSHumanReadableCopyright: "Copyright © 2026. All rights reserved."
         LSMinimumSystemVersion: "14.0"
+        NSServices:
+          - NSMenuItem:
+              default: Analyze with DataX
+            NSPortName: DataX
+            NSMessage: analyzeFolder
+            NSSendFileTypes:
+              - public.folder
+            NSRequiredContext:
+              NSApplicationIdentifier: com.apple.finder
+            NSRestricted: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.datax.app
