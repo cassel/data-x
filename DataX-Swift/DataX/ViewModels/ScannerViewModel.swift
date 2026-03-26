@@ -151,9 +151,64 @@ struct ScanInsights: Equatable {
     }
 }
 
+struct TrashConfirmationRequest: Identifiable, Equatable {
+    let id = UUID()
+    let node: FileNode
+    let treeSessionID: UUID
+
+    var itemKind: String {
+        node.isDirectory ? "Folder" : "File"
+    }
+
+    var confirmButtonTitle: String {
+        "Move \(itemKind) to Trash"
+    }
+
+    var confirmationMessage: String {
+        [
+            "\(itemKind): \(node.name)",
+            "Size: \(SizeFormatter.format(node.size))",
+            "Path: \(node.path.standardizedFileURL.path)"
+        ]
+        .joined(separator: "\n")
+    }
+}
+
+struct TrashUndoRegistration {
+    let originalItemURL: URL
+    let trashedItemURL: URL
+    let removedNode: FileNode
+    let originalParentPath: String?
+    let originalChildIndex: Int
+    let treeSessionID: UUID
+    let rootPath: String?
+}
+
+private enum TrashTreeRestoreResult {
+    case restored
+    case skipped
+}
+
+private enum TrashUndoWarning: LocalizedError {
+    case restoredOutsideCurrentScan(URL)
+
+    var errorDescription: String? {
+        switch self {
+        case .restoredOutsideCurrentScan(let url):
+            return "'\(url.lastPathComponent)' was restored to its original location, but the active scan changed. Refresh to see the restored item."
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class ScannerViewModel {
+    private static let scanFailedTitle = "Scan Failed"
+    private static let moveToTrashFailedTitle = "Move to Trash Failed"
+    private static let undoMoveToTrashFailedTitle = "Undo Move to Trash Failed"
+    private static let undoMoveToTrashLimitedTitle = "Undo Move to Trash Limited"
+    private static let deleteFailedTitle = "Delete Failed"
+
     // MARK: - State
 
     var rootNode: FileNode?
@@ -164,8 +219,10 @@ final class ScannerViewModel {
     var progress: ScanProgress?
     var diskInfo: DiskInfo?
     var error: Error?
+    var errorAlertTitle = "Scan Failed"
     var insights = ScanInsights.empty
     var duplicateReportState: DuplicateReportState = .idle
+    var pendingTrashRequest: TrashConfirmationRequest?
     var searchQuery = ""
     var searchResults: [FileNode] = []
     var treeMutationRevision = 0
@@ -175,13 +232,19 @@ final class ScannerViewModel {
     @ObservationIgnored private var scanner = ScannerService()
     @ObservationIgnored private var scanTask: Task<Void, Never>?
     @ObservationIgnored private let duplicateDetector: any DuplicateDetecting
+    @ObservationIgnored private let fileOperations: FileOperationsClient
     @ObservationIgnored private var duplicateScanTask: Task<Void, Never>?
     @ObservationIgnored private var activeScanSessionID: UUID?
+    @ObservationIgnored private var currentTreeSessionID = UUID()
     @ObservationIgnored private var duplicateReportRevision: Int?
     @ObservationIgnored private var stableNodeIDsByPath: [String: UUID] = [:]
 
-    init(duplicateDetector: any DuplicateDetecting = DuplicateDetector()) {
+    init(
+        duplicateDetector: any DuplicateDetecting = DuplicateDetector(),
+        fileOperations: FileOperationsClient = .live
+    ) {
         self.duplicateDetector = duplicateDetector
+        self.fileOperations = fileOperations
     }
 
     // MARK: - Computed Properties
@@ -214,6 +277,7 @@ final class ScannerViewModel {
 
     func scan(directory: URL) {
         cancelActiveLocalScan(resetScanningState: false)
+        advanceTreeSession()
         invalidateDuplicateReport()
 
         let sessionID = UUID()
@@ -226,7 +290,7 @@ final class ScannerViewModel {
         activeScanSessionID = sessionID
         isScanning = true
         isIncrementalScanInProgress = true
-        error = nil
+        clearError()
         progress = ScanProgress(
             filesScanned: 0,
             directoriesScanned: 0,
@@ -425,17 +489,37 @@ final class ScannerViewModel {
         FileOperationsService.revealInFinder(node.path)
     }
 
-    @discardableResult
-    func beginMoveToTrash(_ node: FileNode) -> Bool {
-        error = nil
+    func dismissError() {
+        clearError()
+    }
 
-        do {
-            try FileOperationsService.moveToTrash(node.path)
-            return true
-        } catch {
-            self.error = error
-            return false
+    func requestMoveToTrash(_ node: FileNode) {
+        clearError()
+        pendingTrashRequest = TrashConfirmationRequest(
+            node: node,
+            treeSessionID: currentTreeSessionID
+        )
+    }
+
+    func cancelPendingTrashRequest() {
+        pendingTrashRequest = nil
+    }
+
+    @discardableResult
+    func confirmPendingTrash(undoManager: UndoManager?) -> FileNode? {
+        guard let request = pendingTrashRequest else { return nil }
+        pendingTrashRequest = nil
+
+        guard request.treeSessionID == currentTreeSessionID,
+              let node = rootNode?.findNode(withPath: request.node.path.standardizedFileURL) else {
+            presentError(
+                FileOperationsService.FileOperationError.fileNotFound(request.node.path.standardizedFileURL),
+                title: Self.moveToTrashFailedTitle
+            )
+            return nil
         }
+
+        return performMoveToTrash(node, undoManager: undoManager)
     }
 
     func commitMoveToTrash(_ node: FileNode) {
@@ -443,21 +527,17 @@ final class ScannerViewModel {
     }
 
     func moveToTrash(_ node: FileNode) {
-        guard beginMoveToTrash(node) else {
-            return
-        }
-
-        commitMoveToTrash(node)
+        requestMoveToTrash(node)
     }
 
     func deleteFile(_ node: FileNode) {
-        error = nil
+        clearError()
 
         do {
-            try FileOperationsService.delete(node.path)
+            try fileOperations.delete(node.path.standardizedFileURL)
             commitNodeRemoval(node)
         } catch {
-            self.error = error
+            presentError(error, title: Self.deleteFailedTitle)
         }
     }
 
@@ -473,12 +553,25 @@ final class ScannerViewModel {
         FileOperationsService.copyPath(node.path)
     }
 
+    func resetToHomeState() {
+        advanceTreeSession()
+        cancelPendingTrashRequest()
+        isScanning = false
+        isIncrementalScanInProgress = false
+        progress = nil
+        diskInfo = nil
+        resetSearch()
+        clearVisibleTree(resetIdentityState: true)
+        clearError()
+    }
+
     func beginRemoteScan() {
         cancelActiveLocalScan(resetScanningState: false)
+        advanceTreeSession()
         clearVisibleTree(resetIdentityState: true)
         isScanning = true
         isIncrementalScanInProgress = false
-        error = nil
+        clearError()
         resetInsightRankings()
         progress = .initial
         resetSearch()
@@ -489,19 +582,20 @@ final class ScannerViewModel {
     }
 
     func completeRemoteScan(with root: FileNode) {
+        advanceTreeSession()
         rootNode = root
         currentNode = root
         navigationStack = [root]
         isScanning = false
         isIncrementalScanInProgress = false
-        error = nil
+        clearError()
         refreshInsightRankings()
         invalidateDuplicateReport()
         treeMutationRevision += 1
     }
 
     func failRemoteScan(with error: Error) {
-        self.error = error
+        presentError(error, title: Self.scanFailedTitle)
         isScanning = false
         isIncrementalScanInProgress = false
         resetInsightRankings()
@@ -530,6 +624,7 @@ final class ScannerViewModel {
         }
 
         if resetScanningState {
+            advanceTreeSession()
             isScanning = false
             isIncrementalScanInProgress = false
             progress = nil
@@ -614,7 +709,7 @@ final class ScannerViewModel {
         resetSearch()
         isScanning = false
         isIncrementalScanInProgress = false
-        error = nil
+        clearError()
         refreshInsightRankings()
         invalidateDuplicateReport()
         treeMutationRevision += 1
@@ -625,6 +720,7 @@ final class ScannerViewModel {
     private func finishCancelledLocalScan(sessionID: UUID) {
         guard activeScanSessionID == sessionID else { return }
 
+        advanceTreeSession()
         isScanning = false
         isIncrementalScanInProgress = false
         progress = nil
@@ -659,6 +755,7 @@ final class ScannerViewModel {
     private func clearVisibleTree(resetIdentityState: Bool) {
         let hadVisibleTree = rootNode != nil || currentNode != nil || !navigationStack.isEmpty
 
+        pendingTrashRequest = nil
         invalidateDuplicateReport()
         rootNode = nil
         currentNode = nil
@@ -673,6 +770,171 @@ final class ScannerViewModel {
         }
 
         resetInsightRankings()
+    }
+
+    func makeTrashUndoRegistration(
+        for node: FileNode,
+        trashedItemURL: URL
+    ) -> TrashUndoRegistration? {
+        let standardizedItemURL = node.path.standardizedFileURL
+        let standardizedTrashURL = trashedItemURL.standardizedFileURL
+        let rootPath = rootNode?.path.standardizedFileURL.path
+
+        if rootNode?.id == node.id {
+            return TrashUndoRegistration(
+                originalItemURL: standardizedItemURL,
+                trashedItemURL: standardizedTrashURL,
+                removedNode: node,
+                originalParentPath: nil,
+                originalChildIndex: 0,
+                treeSessionID: currentTreeSessionID,
+                rootPath: rootPath
+            )
+        }
+
+        guard let parent = findParent(of: node, in: rootNode),
+              let originalChildIndex = parent.children?.firstIndex(where: { $0.id == node.id }) else {
+            return nil
+        }
+
+        return TrashUndoRegistration(
+            originalItemURL: standardizedItemURL,
+            trashedItemURL: standardizedTrashURL,
+            removedNode: node,
+            originalParentPath: parent.path.standardizedFileURL.path,
+            originalChildIndex: originalChildIndex,
+            treeSessionID: currentTreeSessionID,
+            rootPath: rootPath
+        )
+    }
+
+    private func performMoveToTrash(_ node: FileNode, undoManager: UndoManager?) -> FileNode? {
+        clearError()
+
+        do {
+            let trashResult = try fileOperations.moveToTrash(node.path.standardizedFileURL)
+
+            if let registration = makeTrashUndoRegistration(
+                for: node,
+                trashedItemURL: trashResult.trashedItemURL
+            ) {
+                registerUndo(registration, undoManager: undoManager)
+            }
+
+            commitNodeRemoval(node)
+            return node
+        } catch {
+            presentError(error, title: Self.moveToTrashFailedTitle)
+            return nil
+        }
+    }
+
+    private func registerUndo(_ registration: TrashUndoRegistration, undoManager: UndoManager?) {
+        guard let undoManager else { return }
+
+        undoManager.registerUndo(withTarget: self) { target in
+            target.undoMoveToTrash(registration, undoManager: undoManager)
+        }
+        undoManager.setActionName("Move to Trash")
+    }
+
+    private func undoMoveToTrash(_ registration: TrashUndoRegistration, undoManager: UndoManager?) {
+        clearError()
+
+        do {
+            try fileOperations.restoreFromTrash(
+                registration.trashedItemURL,
+                registration.originalItemURL
+            )
+
+            switch restoreNodeInTree(from: registration) {
+            case .restored:
+                undoManager?.setActionName("Move to Trash")
+            case .skipped:
+                presentError(
+                    TrashUndoWarning.restoredOutsideCurrentScan(registration.originalItemURL),
+                    title: Self.undoMoveToTrashLimitedTitle
+                )
+            }
+        } catch {
+            presentError(error, title: Self.undoMoveToTrashFailedTitle)
+        }
+    }
+
+    private func restoreNodeInTree(from registration: TrashUndoRegistration) -> TrashTreeRestoreResult {
+        guard registration.treeSessionID == currentTreeSessionID else {
+            return .skipped
+        }
+
+        if registration.originalParentPath == nil {
+            rootNode = registration.removedNode
+            currentNode = registration.removedNode
+            navigationStack = [registration.removedNode]
+            refreshInsightRankings()
+            invalidateDuplicateReport()
+            treeMutationRevision += 1
+            return .restored
+        }
+
+        guard let rootNode,
+              let originalParentPath = registration.originalParentPath,
+              let parent = rootNode.findNode(withPath: URL(fileURLWithPath: originalParentPath).standardizedFileURL) else {
+            return .skipped
+        }
+
+        var children = parent.children ?? []
+
+        if !children.contains(where: { $0.id == registration.removedNode.id }) {
+            let insertionIndex = min(max(registration.originalChildIndex, 0), children.count)
+            children.insert(registration.removedNode, at: insertionIndex)
+            parent.children = children
+            updateSizes(from: parent)
+        }
+
+        syncNavigationState(preferredNode: currentNode ?? parent)
+        refreshSearchResultsIfNeeded()
+        refreshInsightRankings()
+        invalidateDuplicateReport()
+        treeMutationRevision += 1
+        return .restored
+    }
+
+    private func refreshSearchResultsIfNeeded() {
+        guard !searchQuery.isEmpty else { return }
+        performSearch(searchQuery)
+    }
+
+    private func syncNavigationState(preferredNode: FileNode?) {
+        guard let rootNode else {
+            currentNode = nil
+            navigationStack = []
+            return
+        }
+
+        guard let preferredNode,
+              rootNode.containsNode(withID: preferredNode.id) else {
+            currentNode = rootNode
+            navigationStack = [rootNode]
+            return
+        }
+
+        currentNode = preferredNode
+        navigationStack = FileNodePathResolver.path(from: rootNode, to: preferredNode)
+    }
+
+    private func clearError() {
+        error = nil
+        errorAlertTitle = Self.scanFailedTitle
+    }
+
+    private func presentError(_ error: Error, title: String) {
+        self.error = error
+        errorAlertTitle = title
+    }
+
+    private func advanceTreeSession() {
+        currentTreeSessionID = UUID()
+        pendingTrashRequest = nil
     }
 
     private func standardizedPath(for url: URL) -> String {

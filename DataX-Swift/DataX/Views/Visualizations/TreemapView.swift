@@ -7,8 +7,7 @@ struct TreemapView: View {
     let onSelect: (FileNode) -> Void
     let layoutRevision: Int
     let incrementalScanInProgress: Bool
-    let onMoveToTrash: (FileNode) -> Bool
-    let onCommitMoveToTrash: (FileNode) -> Void
+    let onMoveToTrash: (FileNode) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var hitTestCache = TreemapHitTestCache.empty
@@ -839,47 +838,9 @@ struct TreemapView: View {
 
     private func beginAnimatedTrash(for target: FileNode, in viewSize: CGSize) {
         guard !incrementalScanInProgress else { return }
-        guard deletionAnimation == nil else { return }
-        guard onMoveToTrash(target) else { return }
-
-        guard let animation = makeDeletionAnimation(for: target, in: viewSize) else {
-            hoveredNode = nil
-            lastMouseLocation = nil
-            onCommitMoveToTrash(target)
-            buildCache(size: viewSize)
-            return
-        }
-
         hoveredNode = nil
-        deletionAnimation = animation
-        scheduleDeletionCommit(for: animation)
-    }
-
-    private func makeDeletionAnimation(for target: FileNode, in viewSize: CGSize) -> TreemapDeletionAnimation? {
-        guard let targetRect = hitTestCache.rect(for: target.id) else { return nil }
-        guard let previewNode = node.clonedSubtree(removingNodeWithID: target.id) else { return nil }
-
-        return TreemapDeletionAnimation(
-            targetNode: target,
-            targetRect: targetRect,
-            sourceRects: cachedRects,
-            destinationRects: layoutRects(for: previewNode, size: viewSize),
-            startedAt: .now,
-            reduceMotion: accessibilityReduceMotion
-        )
-    }
-
-    private func scheduleDeletionCommit(for animation: TreemapDeletionAnimation) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + animation.motion.totalDuration) {
-            if deletionAnimation?.token == animation.token {
-                applyHitTestCache(makeHitTestCache(rects: animation.destinationRects, size: lastViewSize))
-                deletionAnimation = nil
-                hoveredNode = nil
-                lastMouseLocation = nil
-            }
-
-            onCommitMoveToTrash(animation.targetNode)
-        }
+        lastMouseLocation = nil
+        onMoveToTrash(target)
     }
 
     private func isAnimatingRemoval(for node: FileNode) -> Bool {
@@ -1347,8 +1308,7 @@ struct MouseTracker: NSViewRepresentable {
         onSelect: { _ in },
         layoutRevision: 0,
         incrementalScanInProgress: false,
-        onMoveToTrash: { _ in true },
-        onCommitMoveToTrash: { _ in }
+        onMoveToTrash: { _ in }
     )
     .frame(width: 600, height: 400)
 }

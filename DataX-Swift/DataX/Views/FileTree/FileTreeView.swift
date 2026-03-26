@@ -85,7 +85,7 @@ struct FileTreeView: View {
         Divider()
 
         Button(role: .destructive) {
-            try? FileOperationsService.moveToTrash(node.path)
+            _ = try? FileOperationsService.moveToTrash(node.path)
         } label: {
             Label("Move to Trash", systemImage: "trash")
         }

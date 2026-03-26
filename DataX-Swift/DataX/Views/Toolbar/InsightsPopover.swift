@@ -33,7 +33,8 @@ struct InsightsToolbarPopoverButton: View {
                 },
                 onMoveDuplicateToTrash: { path in
                     guard let node = appState.scannerViewModel.node(atPath: path) else { return }
-                    appState.scannerViewModel.moveToTrash(node)
+                    appState.scannerViewModel.requestMoveToTrash(node)
+                    isPopoverPresented = false
                 }
             )
         }

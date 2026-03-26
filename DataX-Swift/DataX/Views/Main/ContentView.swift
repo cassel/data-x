@@ -144,9 +144,25 @@ struct ContentTransitionMotionPolicy {
     }
 }
 
+private struct ShellAlertState: Identifiable {
+    enum Source {
+        case scanner
+        case ssh
+    }
+
+    let source: Source
+    let title: String
+    let message: String
+
+    var id: String {
+        "\(source)-\(title)-\(message)"
+    }
+}
+
 struct ContentView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.undoManager) private var undoManager
     @Namespace private var transitionNamespace
     @State private var isLegendVisible = false
     @State private var visualizationNavigationDirection: VisualizationNavigationDirection = .neutral
@@ -183,16 +199,43 @@ struct ContentView: View {
         .onChange(of: state.scannerViewModel.rootNode?.id) { _, _ in
             isLegendVisible = false
         }
-        .alert(
-            "Scan Failed",
+        .confirmationDialog(
+            "Move to Trash?",
             isPresented: Binding(
-                get: { state.scannerViewModel.error != nil || state.sshViewModel.error != nil },
-                set: { if !$0 { state.scannerViewModel.error = nil; state.sshViewModel.error = nil } }
-            )
+                get: { state.scannerViewModel.pendingTrashRequest != nil },
+                set: { if !$0 { state.scannerViewModel.cancelPendingTrashRequest() } }
+            ),
+            titleVisibility: .visible
         ) {
-            Button("OK", role: .cancel) {}
+            if let request = state.scannerViewModel.pendingTrashRequest {
+                Button(request.confirmButtonTitle, role: .destructive) {
+                    confirmMoveToTrash()
+                }
+
+                Button("Cancel", role: .cancel) {
+                    state.scannerViewModel.cancelPendingTrashRequest()
+                }
+            }
         } message: {
-            Text(state.sshViewModel.error ?? state.scannerViewModel.error?.localizedDescription ?? "Unknown error")
+            if let request = state.scannerViewModel.pendingTrashRequest {
+                Text(request.confirmationMessage)
+            }
+        }
+        .alert(item: Binding(
+            get: { activeShellAlert(for: state) },
+            set: { newValue in
+                if newValue == nil {
+                    dismissShellAlert()
+                }
+            }
+        )) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                dismissButton: .cancel(Text("OK")) {
+                    dismissShellAlert()
+                }
+            )
         }
     }
 
@@ -211,7 +254,7 @@ struct ContentView: View {
                         get: { state.highlightedNode },
                         set: { state.highlightedNode = $0 }
                     ),
-                    onMoveToTrash: moveToTrashImmediately,
+                    onMoveToTrash: requestMoveToTrash,
                     onNavigate: { node in
                         navigate(to: node, clearHighlight: true)
                     }
@@ -434,8 +477,7 @@ struct ContentView: View {
                 onSelect: { navigate(to: $0) },
                 layoutRevision: treeMutationRevision,
                 incrementalScanInProgress: appState.scannerViewModel.isIncrementalScanInProgress,
-                onMoveToTrash: { appState.scannerViewModel.beginMoveToTrash($0) },
-                onCommitMoveToTrash: commitMoveToTrash
+                onMoveToTrash: requestMoveToTrash
             )
         case .sunburst:
             SunburstView(node: node) { navigate(to: $0) }
@@ -479,14 +521,41 @@ struct ContentView: View {
         return navigationStack.count + 1
     }
 
-    private func moveToTrashImmediately(_ node: FileNode) {
-        guard appState.scannerViewModel.beginMoveToTrash(node) else { return }
-        commitMoveToTrash(node)
+    private func requestMoveToTrash(_ node: FileNode) {
+        appState.scannerViewModel.requestMoveToTrash(node)
     }
 
-    private func commitMoveToTrash(_ node: FileNode) {
-        clearHighlightIfNeeded(forRemovedNode: node)
-        appState.scannerViewModel.commitMoveToTrash(node)
+    private func confirmMoveToTrash() {
+        guard let removedNode = appState.scannerViewModel.confirmPendingTrash(undoManager: undoManager) else {
+            return
+        }
+
+        clearHighlightIfNeeded(forRemovedNode: removedNode)
+    }
+
+    private func activeShellAlert(for state: AppState) -> ShellAlertState? {
+        if let sshError = state.sshViewModel.error {
+            return ShellAlertState(
+                source: .ssh,
+                title: "Connection Failed",
+                message: sshError
+            )
+        }
+
+        if let scannerError = state.scannerViewModel.error {
+            return ShellAlertState(
+                source: .scanner,
+                title: state.scannerViewModel.errorAlertTitle,
+                message: scannerError.localizedDescription
+            )
+        }
+
+        return nil
+    }
+
+    private func dismissShellAlert() {
+        appState.scannerViewModel.dismissError()
+        appState.sshViewModel.error = nil
     }
 
     private func clearHighlightIfNeeded(forRemovedNode node: FileNode) {

@@ -77,12 +77,7 @@ final class AppState {
     }
 
     func returnHome() {
-        scannerViewModel.invalidateDuplicateReport()
-        scannerViewModel.rootNode = nil
-        scannerViewModel.currentNode = nil
-        scannerViewModel.navigationStack = []
-        scannerViewModel.diskInfo = nil
-        scannerViewModel.insights = .empty
+        scannerViewModel.resetToHomeState()
         lastScannedURL = nil
         highlightedNode = nil
     }
