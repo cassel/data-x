@@ -9,8 +9,11 @@ struct TreemapView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var cachedRects: [TreemapRect] = []
     @State private var hoveredNode: FileNode?
+    @State private var lastMouseLocation: CGPoint?
     @State private var lastUpdateTime: Date = .distantPast
     @State private var pulseExpanded = false
+    @State private var zoomState = VisualizationZoomState()
+    @GestureState private var zoomGesture = VisualizationZoomGestureState()
 
     private let maxDepth = 6
     private let throttleInterval: TimeInterval = 0.016 // ~60fps
@@ -41,34 +44,65 @@ struct TreemapView: View {
         shouldRenderPulse && pulseExpanded ? pulseScaleMax : 1
     }
 
+    private var effectiveZoomScale: CGFloat {
+        zoomState.effectiveScale(
+            gestureMagnification: zoomGesture.magnification,
+            reduceMotion: accessibilityReduceMotion
+        )
+    }
+
+    private var effectiveZoomAnchor: UnitPoint {
+        zoomState.effectiveAnchor(activeAnchor: zoomGesture.anchor)
+    }
+
+    private var zoomCompletionAnimation: Animation {
+        if accessibilityReduceMotion {
+            return .easeOut(duration: 0.12)
+        }
+
+        return .spring(response: 0.28, dampingFraction: 0.82)
+    }
+
+    private var magnifyGesture: some Gesture {
+        MagnifyGesture()
+            .updating($zoomGesture) { value, state, _ in
+                state = VisualizationZoomGestureState(
+                    magnification: value.magnification,
+                    anchor: value.startAnchor
+                )
+            }
+            .onEnded { value in
+                withAnimation(zoomCompletionAnimation) {
+                    zoomState.commit(
+                        gestureMagnification: value.magnification,
+                        gestureAnchor: value.startAnchor
+                    )
+                }
+            }
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 Color(nsColor: .windowBackgroundColor)
 
                 // Static treemap layer - rasterized for performance
-                Canvas { context, _ in
-                    drawTreemapStatic(context: &context)
+                Canvas { context, size in
+                    drawTreemapStatic(context: &context, size: size)
                 }
                 .drawingGroup()
 
                 // Hover overlay - lightweight
-                Canvas { context, _ in
-                    drawHoverOverlay(context: context)
+                Canvas { context, size in
+                    drawHoverOverlay(context: context, size: size)
                 }
 
                 // Click handling
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if let hovered = hoveredNode, hovered.isDirectory {
-                            onSelect(hovered)
-                        }
-                    }
+                interactionLayer()
             }
             .background(
                 MouseTracker { location in
-                    handleMouseMove(location)
+                    handleMouseMove(location, in: geometry.size)
                 }
             )
             .overlay(alignment: .topLeading) {
@@ -83,28 +117,63 @@ struct TreemapView: View {
             }
             .onChange(of: geometry.size) { _, newSize in
                 buildCache(size: newSize)
+                refreshHoveredNode(in: newSize)
             }
             .onChange(of: node.id) { _, _ in
+                resetZoom(animated: false)
+                hoveredNode = nil
+                lastMouseLocation = nil
+                lastUpdateTime = .distantPast
                 buildCache(size: geometry.size)
             }
             .onChange(of: accessibilityReduceMotion) { _, _ in
                 configurePulseAnimation()
             }
+            .onChange(of: zoomGesture) { _, _ in
+                refreshHoveredNode(in: geometry.size)
+            }
+            .onChange(of: zoomState) { _, _ in
+                refreshHoveredNode(in: geometry.size)
+            }
+            .simultaneousGesture(magnifyGesture)
         }
     }
 
     // MARK: - Mouse Handling
 
-    private func handleMouseMove(_ location: CGPoint?) {
+    private func handleMouseMove(_ location: CGPoint?, in viewSize: CGSize) {
         let now = Date()
         guard now.timeIntervalSince(lastUpdateTime) >= throttleInterval else { return }
         lastUpdateTime = now
 
-        if let loc = location {
-            hoveredNode = findHoveredNode(at: loc)
+        lastMouseLocation = location
+
+        if let location {
+            let contentPoint = VisualizationZoomState.contentPoint(
+                for: location,
+                in: viewSize,
+                scale: effectiveZoomScale,
+                anchor: effectiveZoomAnchor
+            )
+            hoveredNode = findHoveredNode(at: contentPoint)
         } else {
             hoveredNode = nil
         }
+    }
+
+    private func refreshHoveredNode(in viewSize: CGSize) {
+        guard let lastMouseLocation else {
+            hoveredNode = nil
+            return
+        }
+
+        let contentPoint = VisualizationZoomState.contentPoint(
+            for: lastMouseLocation,
+            in: viewSize,
+            scale: effectiveZoomScale,
+            anchor: effectiveZoomAnchor
+        )
+        hoveredNode = findHoveredNode(at: contentPoint)
     }
 
     // MARK: - Cache
@@ -138,7 +207,8 @@ struct TreemapView: View {
 
     // MARK: - Static Drawing
 
-    private func drawTreemapStatic(context: inout GraphicsContext) {
+    private func drawTreemapStatic(context: inout GraphicsContext, size: CGSize) {
+        applyZoomTransform(to: &context, size: size)
         let pulseTargetID = pulseTargetRect?.id
 
         for rect in cachedRects {
@@ -188,9 +258,12 @@ struct TreemapView: View {
 
     // MARK: - Hover Overlay
 
-    private func drawHoverOverlay(context: GraphicsContext) {
+    private func drawHoverOverlay(context: GraphicsContext, size: CGSize) {
         guard let highlighted = effectiveHighlight else { return }
         guard let highlightedRect = cachedRects.first(where: { $0.node.id == highlighted.id }) else { return }
+
+        var context = context
+        applyZoomTransform(to: &context, size: size)
 
         // Find top-level parent
         let parentRect = findTopLevelParent(of: highlightedRect)
@@ -214,6 +287,16 @@ struct TreemapView: View {
         context.stroke(highlightedPath, with: .color(borderColor), lineWidth: 2)
     }
 
+    private func applyZoomTransform(to context: inout GraphicsContext, size: CGSize) {
+        let scale = effectiveZoomScale
+        guard abs(scale - 1) > 0.0001 else { return }
+
+        let anchorPoint = VisualizationZoomState.anchorPoint(for: effectiveZoomAnchor, in: size)
+        context.translateBy(x: anchorPoint.x, y: anchorPoint.y)
+        context.scaleBy(x: scale, y: scale)
+        context.translateBy(x: -anchorPoint.x, y: -anchorPoint.y)
+    }
+
     private func findTopLevelParent(of rect: TreemapRect) -> TreemapRect? {
         if rect.depth == 0 { return rect }
         return cachedRects.first { $0.depth == 0 && $0.contains(rect.center) }
@@ -234,6 +317,50 @@ struct TreemapView: View {
         pulseExpanded = false
         withAnimation(pulseAnimation) {
             pulseExpanded = true
+        }
+    }
+
+    private func handlePrimaryTap() {
+        if let hoveredNode, hoveredNode.isDirectory {
+            onSelect(hoveredNode)
+        }
+    }
+
+    private func handleResetTap() {
+        guard zoomState.canReset else { return }
+        resetZoom(animated: true)
+    }
+
+    private func resetZoom(animated: Bool) {
+        if animated {
+            withAnimation(zoomCompletionAnimation) {
+                zoomState.reset()
+            }
+            return
+        }
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            zoomState.reset()
+        }
+    }
+
+    @ViewBuilder
+    private func interactionLayer() -> some View {
+        let surface = Color.clear
+            .contentShape(Rectangle())
+            .onTapGesture {
+                handlePrimaryTap()
+            }
+
+        if zoomState.canReset {
+            surface.highPriorityGesture(
+                TapGesture(count: 2)
+                    .onEnded(handleResetTap)
+            )
+        } else {
+            surface
         }
     }
 
@@ -293,6 +420,112 @@ struct TreemapPulsePolicy {
 
     static func shouldRenderPulse(reduceMotion: Bool, hasHover: Bool, hasHighlight: Bool) -> Bool {
         !reduceMotion && !hasHover && !hasHighlight
+    }
+}
+
+struct VisualizationZoomGestureState: Equatable {
+    var magnification: CGFloat = 1
+    var anchor: UnitPoint?
+}
+
+struct VisualizationZoomState: Equatable {
+    static let scaleRange: ClosedRange<CGFloat> = 1...5
+
+    var committedScale: CGFloat = scaleRange.lowerBound
+    var committedAnchor: UnitPoint = .center
+
+    var canReset: Bool {
+        Self.prefersResetDoubleTap(totalScale: committedScale)
+    }
+
+    func effectiveScale(gestureMagnification: CGFloat, reduceMotion: Bool) -> CGFloat {
+        let rawScale = committedScale * gestureMagnification
+
+        if reduceMotion {
+            return Self.clamp(rawScale)
+        }
+
+        return Self.rubberBand(rawScale)
+    }
+
+    func effectiveAnchor(activeAnchor: UnitPoint?) -> UnitPoint {
+        activeAnchor ?? committedAnchor
+    }
+
+    mutating func commit(gestureMagnification: CGFloat, gestureAnchor: UnitPoint?) {
+        let finalScale = Self.clamp(committedScale * gestureMagnification)
+        committedScale = finalScale
+
+        if Self.prefersResetDoubleTap(totalScale: finalScale), let gestureAnchor {
+            committedAnchor = gestureAnchor
+        } else {
+            committedAnchor = .center
+        }
+    }
+
+    mutating func reset() {
+        committedScale = Self.scaleRange.lowerBound
+        committedAnchor = .center
+    }
+
+    static func prefersResetDoubleTap(totalScale: CGFloat) -> Bool {
+        totalScale > scaleRange.lowerBound + 0.001
+    }
+
+    static func anchorPoint(for anchor: UnitPoint, in size: CGSize) -> CGPoint {
+        CGPoint(x: anchor.x * size.width, y: anchor.y * size.height)
+    }
+
+    static func viewPoint(
+        for contentPoint: CGPoint,
+        in size: CGSize,
+        scale: CGFloat,
+        anchor: UnitPoint
+    ) -> CGPoint {
+        let anchorPoint = anchorPoint(for: anchor, in: size)
+        return CGPoint(
+            x: anchorPoint.x + (contentPoint.x - anchorPoint.x) * scale,
+            y: anchorPoint.y + (contentPoint.y - anchorPoint.y) * scale
+        )
+    }
+
+    static func contentPoint(
+        for viewPoint: CGPoint,
+        in size: CGSize,
+        scale: CGFloat,
+        anchor: UnitPoint
+    ) -> CGPoint {
+        let anchorPoint = anchorPoint(for: anchor, in: size)
+        guard abs(scale) > 0.0001 else { return viewPoint }
+
+        return CGPoint(
+            x: anchorPoint.x + (viewPoint.x - anchorPoint.x) / scale,
+            y: anchorPoint.y + (viewPoint.y - anchorPoint.y) / scale
+        )
+    }
+
+    private static func clamp(_ scale: CGFloat) -> CGFloat {
+        min(max(scale, scaleRange.lowerBound), scaleRange.upperBound)
+    }
+
+    private static func rubberBand(_ scale: CGFloat) -> CGFloat {
+        if scale < scaleRange.lowerBound {
+            let overshoot = scaleRange.lowerBound - scale
+            return scaleRange.lowerBound - rubberBandDistance(for: overshoot)
+        }
+
+        if scale > scaleRange.upperBound {
+            let overshoot = scale - scaleRange.upperBound
+            return scaleRange.upperBound + rubberBandDistance(for: overshoot)
+        }
+
+        return scale
+    }
+
+    private static func rubberBandDistance(for overshoot: CGFloat) -> CGFloat {
+        let factor: CGFloat = 0.45
+        let scaledOvershoot = overshoot * factor
+        return scaledOvershoot / (scaledOvershoot + 1)
     }
 }
 

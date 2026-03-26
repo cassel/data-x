@@ -4,8 +4,12 @@ struct SunburstView: View {
     let node: FileNode
     let onSelect: (FileNode) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var hoveredNode: FileNode?
     @State private var computedArcs: [ArcData] = []
+    @State private var cachedArcRadius: CGFloat = 0
+    @State private var zoomState = VisualizationZoomState()
+    @GestureState private var zoomGesture = VisualizationZoomGestureState()
 
     private let maxDepth = 4
     private let innerRadius: CGFloat = 60
@@ -30,52 +34,165 @@ struct SunburstView: View {
         }
     }
 
+    private var effectiveZoomScale: CGFloat {
+        zoomState.effectiveScale(
+            gestureMagnification: zoomGesture.magnification,
+            reduceMotion: accessibilityReduceMotion
+        )
+    }
+
+    private var effectiveZoomAnchor: UnitPoint {
+        zoomState.effectiveAnchor(activeAnchor: zoomGesture.anchor)
+    }
+
+    private var zoomCompletionAnimation: Animation {
+        if accessibilityReduceMotion {
+            return .easeOut(duration: 0.12)
+        }
+
+        return .spring(response: 0.28, dampingFraction: 0.82)
+    }
+
+    private var shouldPreferResetDoubleTap: Bool {
+        VisualizationZoomState.prefersResetDoubleTap(totalScale: effectiveZoomScale)
+    }
+
+    private var magnifyGesture: some Gesture {
+        MagnifyGesture()
+            .updating($zoomGesture) { value, state, _ in
+                state = VisualizationZoomGestureState(
+                    magnification: value.magnification,
+                    anchor: value.startAnchor
+                )
+            }
+            .onEnded { value in
+                withAnimation(zoomCompletionAnimation) {
+                    zoomState.commit(
+                        gestureMagnification: value.magnification,
+                        gestureAnchor: value.startAnchor
+                    )
+                }
+            }
+    }
+
     var body: some View {
         GeometryReader { geometry in
             let center = CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2)
             let maxRadius = min(geometry.size.width, geometry.size.height) / 2 - 20
-            let arcData = arcs(for: node, maxRadius: maxRadius)
 
-            ZStack {
-                // Draw arcs
-                ForEach(arcData) { arc in
-                    SunburstArc(arc: arc, center: center, isHovered: hoveredNode?.id == arc.node.id)
-                        .onTapGesture(count: 2) {
-                            if arc.node.isDirectory {
-                                onSelect(arc.node)
-                            }
-                        }
-                        .onHover { isHovered in
-                            hoveredNode = isHovered ? arc.node : nil
-                        }
+            interactiveContent(center: center)
+                .onAppear {
+                    rebuildArcs(maxRadius: maxRadius)
                 }
-
-                // Center circle
-                Circle()
-                    .fill(Color(nsColor: .windowBackgroundColor))
-                    .frame(width: innerRadius * 2, height: innerRadius * 2)
-                    .position(center)
-
-                // Center label
-                VStack(spacing: 4) {
-                    Text(node.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text(node.formattedSize)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                .onChange(of: geometry.size) { _, _ in
+                    rebuildArcs(maxRadius: maxRadius)
                 }
-                .frame(width: innerRadius * 1.8)
-                .position(center)
+                .onChange(of: node.id) { _, _ in
+                    hoveredNode = nil
+                    cachedArcRadius = 0
+                    resetZoom(animated: false)
+                    rebuildArcs(maxRadius: maxRadius)
+                }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func rebuildArcs(maxRadius: CGFloat) {
+        guard maxRadius > innerRadius else {
+            computedArcs = []
+            cachedArcRadius = 0
+            return
+        }
+
+        guard computedArcs.isEmpty || abs(cachedArcRadius - maxRadius) > 0.5 else { return }
+        computedArcs = arcs(for: node, maxRadius: maxRadius)
+        cachedArcRadius = maxRadius
+    }
+
+    private func resetZoom(animated: Bool) {
+        if animated {
+            withAnimation(zoomCompletionAnimation) {
+                zoomState.reset()
             }
-            .overlay(alignment: .topLeading) {
-                if let hoveredNode {
-                    SunburstInfoPanel(node: hoveredNode)
-                        .padding()
+            return
+        }
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            zoomState.reset()
+        }
+    }
+
+    private func handleResetTap() {
+        guard shouldPreferResetDoubleTap else { return }
+        resetZoom(animated: true)
+    }
+
+    @ViewBuilder
+    private func interactiveContent(center: CGPoint) -> some View {
+        let content = ZStack {
+            ForEach(computedArcs) { arc in
+                arcView(arc, center: center)
+            }
+
+            Circle()
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .frame(width: innerRadius * 2, height: innerRadius * 2)
+                .position(center)
+
+            VStack(spacing: 4) {
+                Text(node.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(node.formattedSize)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .frame(width: innerRadius * 1.8)
+            .position(center)
+        }
+        .contentShape(Rectangle())
+        .scaleEffect(effectiveZoomScale, anchor: effectiveZoomAnchor)
+        .overlay(alignment: .topLeading) {
+            if let hoveredNode {
+                SunburstInfoPanel(node: hoveredNode)
+                    .padding()
+            }
+        }
+        .simultaneousGesture(magnifyGesture)
+
+        if shouldPreferResetDoubleTap {
+            content.highPriorityGesture(
+                TapGesture(count: 2)
+                    .onEnded(handleResetTap),
+                including: .all
+            )
+        } else {
+            content
+        }
+    }
+
+    @ViewBuilder
+    private func arcView(_ arc: ArcData, center: CGPoint) -> some View {
+        let content = SunburstArc(
+            arc: arc,
+            center: center,
+            isHovered: hoveredNode?.id == arc.node.id
+        )
+        .onHover { isHovered in
+            hoveredNode = isHovered ? arc.node : nil
+        }
+
+        if shouldPreferResetDoubleTap {
+            content
+        } else {
+            content.onTapGesture(count: 2) {
+                if arc.node.isDirectory {
+                    onSelect(arc.node)
                 }
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private func arcs(for rootNode: FileNode, maxRadius: CGFloat) -> [ArcData] {
