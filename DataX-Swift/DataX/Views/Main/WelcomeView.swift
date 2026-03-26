@@ -130,8 +130,7 @@ private struct WelcomeConnectionRow: View {
             .buttonStyle(.plain)
             .help("Edit Connection")
         }
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .contextMenu {
             Button {
                 state.sshViewModel.connect(connection, scannerVM: state.scannerViewModel)

@@ -118,7 +118,7 @@ struct BarChartView: View {
             .padding(.horizontal)
         }
         .frame(height: 30)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(.ultraThinMaterial)
     }
 }
 

@@ -19,7 +19,7 @@ struct StatusBarView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(.regularMaterial)
         .font(.system(size: 11))
     }
 
@@ -204,8 +204,7 @@ struct StatBadge: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .cornerRadius(8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

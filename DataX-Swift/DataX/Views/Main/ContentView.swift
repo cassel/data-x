@@ -91,7 +91,7 @@ struct ContentView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
-                    .background(Color(nsColor: .controlBackgroundColor))
+                    .background(.ultraThinMaterial)
 
                     Divider()
 
@@ -104,6 +104,7 @@ struct ContentView: View {
                     StatusBarView()
                 }
                 .frame(minWidth: 400)
+                .background(.regularMaterial)
 
                 // Right Sidebar - Visualizations & Stats
                 SidebarView()
@@ -169,7 +170,7 @@ struct FileTreePanel: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color(nsColor: .controlBackgroundColor))
+            .background(.ultraThinMaterial)
 
             Divider()
 
@@ -193,6 +194,7 @@ struct FileTreePanel: View {
             }
             .listStyle(.inset(alternatesRowBackgrounds: true))
         }
+        .background(.regularMaterial)
     }
 }
 
@@ -490,7 +492,7 @@ struct SidebarView: View {
                 .help("Open Folder")
             }
             .padding(12)
-            .background(Color(nsColor: .controlBackgroundColor))
+            .background(.ultraThinMaterial)
 
             Divider()
 
@@ -560,7 +562,7 @@ struct SidebarView: View {
                 .padding(12)
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(.regularMaterial)
     }
 
     private func calculateCategoryStats(from node: FileNode) -> [CategoryStat] {

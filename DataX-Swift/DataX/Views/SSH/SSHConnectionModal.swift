@@ -44,7 +44,7 @@ struct SSHConnectionModal: View {
                 Spacer()
             }
             .padding()
-            .background(Color(nsColor: .controlBackgroundColor))
+            .background(.regularMaterial)
 
             Divider()
 
@@ -245,8 +245,7 @@ struct SSHConnectionModal: View {
                     }
                 }
                 .padding(8)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .cornerRadius(6)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
         }
     }
