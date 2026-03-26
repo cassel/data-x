@@ -36,6 +36,7 @@
 		9762A6933EEC94ECCD5D688C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E1CE0587AA6C4BFC28A455 /* ContentView.swift */; };
 		9DEAA80264B7F320DA27530C /* SSHConnectionModal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4C91991DAB418A6E1227B37 /* SSHConnectionModal.swift */; };
 		A019389E3DB65A74C0327990 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B82504BA3A6CE6B34B79940 /* AppDelegate.swift */; };
+		A4AC52C2971AA11298C0B87C /* VisualizationAccessibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54FAC8F8B511A39203270C00 /* VisualizationAccessibility.swift */; };
 		A7E959C1CF10F7F7838BF920 /* FileCategory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FF7262ECBECD09DD652AA8 /* FileCategory.swift */; };
 		B12489498EFF405260FFB0F3 /* ColorPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = D67061EBA6A3D2C87875DCA5 /* ColorPalette.swift */; };
 		B79C43F4CDB36E562C44C555 /* SSHViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42F65EE890E79E0D42024F00 /* SSHViewModel.swift */; };
@@ -75,6 +76,7 @@
 		4EA465BBD60EB8A32EE4F254 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		51F9F4AEEB598CA74D43B5EA /* SSHConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConnection.swift; sourceTree = "<group>"; };
 		5231515C43CA25E8FA38F29E /* DuplicateDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateDetector.swift; sourceTree = "<group>"; };
+		54FAC8F8B511A39203270C00 /* VisualizationAccessibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualizationAccessibility.swift; sourceTree = "<group>"; };
 		5A77A950DBEBF1E9615D5AED /* TreemapSpatialIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreemapSpatialIndex.swift; sourceTree = "<group>"; };
 		5DEB9B1B3C5D88A9BED7347F /* FileTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeView.swift; sourceTree = "<group>"; };
 		7B657EDAD7164A2D8EC5AC59 /* TreemapLayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreemapLayerView.swift; sourceTree = "<group>"; };
@@ -272,6 +274,7 @@
 				EC70483222164363921D74FD /* SizeFormatter.swift */,
 				0230A55006976CBF758670A3 /* TreemapLayout.swift */,
 				5A77A950DBEBF1E9615D5AED /* TreemapSpatialIndex.swift */,
+				54FAC8F8B511A39203270C00 /* VisualizationAccessibility.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -425,6 +428,7 @@
 				24D18AA28ECD2606FFB1EDD2 /* TreemapSpatialIndex.swift in Sources */,
 				3E735714223F773DA4176E7B /* TreemapView.swift in Sources */,
 				EF5DB5A204782FD366529960 /* TrendSparkline.swift in Sources */,
+				A4AC52C2971AA11298C0B87C /* VisualizationAccessibility.swift in Sources */,
 				2FB4C9F6CDF876C8425285EF /* WelcomeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

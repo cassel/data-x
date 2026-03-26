@@ -10,8 +10,11 @@ struct TreemapView: View {
     let onMoveToTrash: (FileNode) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @AccessibilityFocusState private var accessibilityFocusedRectID: UUID?
+    @FocusState private var isTreemapFocused: Bool
     @State private var hitTestCache = TreemapHitTestCache.empty
     @State private var hoveredNode: FileNode?
+    @State private var keyboardFocusedRectID: UUID?
     @State private var lastMouseLocation: CGPoint?
     @State private var lastUpdateTime: Date = .distantPast
     @State private var rendererRevision = 0
@@ -35,17 +38,45 @@ struct TreemapView: View {
         hitTestCache.rects
     }
 
-    // Combined: hover takes priority, otherwise use highlighted from tree
-    private var effectiveHighlight: FileNode? {
-        let candidate = hoveredNode ?? highlightedNode
+    private var treemapAccessibilityNodes: [TreemapAccessibilityNode] {
+        cachedRects.map {
+            TreemapAccessibilityNode(
+                id: $0.id,
+                frame: $0.displayRect,
+                depth: $0.depth
+            )
+        }
+    }
 
-        guard let candidate,
-              !isAnimatingRemoval(for: candidate),
-              activeRect(for: candidate.id) != nil else {
+    private var keyboardFocusedNode: FileNode? {
+        guard let keyboardFocusedRectID,
+              let rect = activeRect(for: keyboardFocusedRectID),
+              !isAnimatingRemoval(for: rect.node) else {
             return nil
         }
 
-        return candidate
+        return rect.node
+    }
+
+    // Combined: hover takes priority, then keyboard focus, then file-tree selection.
+    private var effectiveHighlight: TreemapHighlightState? {
+        if let hoveredNode,
+           !isAnimatingRemoval(for: hoveredNode),
+           activeRect(for: hoveredNode.id) != nil {
+            return TreemapHighlightState(node: hoveredNode, source: .hover)
+        }
+
+        if let keyboardFocusedNode {
+            return TreemapHighlightState(node: keyboardFocusedNode, source: .keyboard)
+        }
+
+        if let highlightedNode,
+           !isAnimatingRemoval(for: highlightedNode),
+           activeRect(for: highlightedNode.id) != nil {
+            return TreemapHighlightState(node: highlightedNode, source: .treeSelection)
+        }
+
+        return nil
     }
 
     private var pulseTargetRect: TreemapRect? {
@@ -114,9 +145,17 @@ struct TreemapView: View {
             }
             .overlay(alignment: .topLeading) {
                 if let highlighted = effectiveHighlight {
-                    InfoPanel(node: highlighted)
+                    InfoPanel(node: highlighted.node)
                         .offset(x: 10, y: 10)
                 }
+            }
+            .focusable()
+            .focused($isTreemapFocused)
+            .onMoveCommand(perform: handleMoveCommand)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Treemap visualization")
+            .accessibilityChildren {
+                treemapAccessibilityChildren()
             }
             .onAppear {
                 buildCache(size: geometry.size)
@@ -131,6 +170,8 @@ struct TreemapView: View {
                 deletionAnimation = nil
                 layoutAnimation = nil
                 hoveredNode = nil
+                keyboardFocusedRectID = nil
+                accessibilityFocusedRectID = nil
                 lastMouseLocation = nil
                 lastUpdateTime = .distantPast
                 buildCache(size: geometry.size)
@@ -141,6 +182,14 @@ struct TreemapView: View {
             }
             .onChange(of: accessibilityReduceMotion) { _, _ in
                 configurePulseAnimation()
+            }
+            .onChange(of: accessibilityFocusedRectID) { _, newValue in
+                guard let newValue, activeRect(for: newValue) != nil else {
+                    keyboardFocusedRectID = nil
+                    return
+                }
+
+                keyboardFocusedRectID = newValue
             }
             .onChange(of: zoomGesture) { _, _ in
                 refreshHoveredNode(in: geometry.size)
@@ -247,6 +296,11 @@ struct TreemapView: View {
 
         if let hoveredNode, cache.rect(for: hoveredNode.id) == nil {
             self.hoveredNode = nil
+        }
+
+        if let keyboardFocusedRectID, cache.rect(for: keyboardFocusedRectID) == nil {
+            self.keyboardFocusedRectID = nil
+            accessibilityFocusedRectID = nil
         }
     }
 
@@ -436,7 +490,7 @@ struct TreemapView: View {
         guard let highlighted = effectiveHighlight else { return }
 
         let activeRects = activeRects(at: date)
-        guard let highlightedRect = activeRect(for: highlighted.id, at: date) else { return }
+        guard let highlightedRect = activeRect(for: highlighted.node.id, at: date) else { return }
 
         var context = context
         applyZoomTransform(to: &context, size: size)
@@ -456,11 +510,22 @@ struct TreemapView: View {
             context.stroke(parentPath, with: .color(.white.opacity(0.8)), lineWidth: 2)
         }
 
-        // Highlighted item border (yellow for hover, cyan for tree selection)
         let padding: CGFloat = highlightedRect.depth == 0 ? 1.0 : 0.5
-        let borderColor: Color = hoveredNode != nil ? .yellow : .cyan
         let highlightedPath = Path(roundedRect: highlightedRect.cgRect.insetBy(dx: padding, dy: padding), cornerRadius: highlightedRect.depth == 0 ? 2 : 1)
-        context.stroke(highlightedPath, with: .color(borderColor), lineWidth: 2)
+
+        switch highlighted.source {
+        case .hover:
+            context.stroke(highlightedPath, with: .color(.yellow), lineWidth: 2)
+        case .keyboard:
+            context.stroke(highlightedPath, with: .color(.white), lineWidth: 4)
+            context.stroke(
+                highlightedPath,
+                with: .color(.black.opacity(0.72)),
+                style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+            )
+        case .treeSelection:
+            context.stroke(highlightedPath, with: .color(.cyan), lineWidth: 2)
+        }
     }
 
     private func activeRect(for id: UUID, at date: Date? = nil) -> TreemapRect? {
@@ -764,6 +829,7 @@ struct TreemapView: View {
 
     private func handlePrimaryTap() {
         guard deletionAnimation == nil, !incrementalScanInProgress else { return }
+        isTreemapFocused = true
 
         if let hoveredNode, hoveredNode.isDirectory {
             onSelect(hoveredNode)
@@ -843,6 +909,86 @@ struct TreemapView: View {
         onMoveToTrash(target)
     }
 
+    private func handleMoveCommand(_ direction: MoveCommandDirection) {
+        guard deletionAnimation == nil else { return }
+        guard let direction = VisualizationKeyboardDirection(direction) else { return }
+        guard !treemapAccessibilityNodes.isEmpty else { return }
+
+        let currentID = keyboardFocusedRectID
+            ?? hoveredNode?.id
+            ?? highlightedNode?.id
+            ?? treemapAccessibilityNodes.first(where: { $0.depth == 0 })?.id
+            ?? treemapAccessibilityNodes.first?.id
+
+        guard let currentID else { return }
+
+        let nextID = TreemapAccessibilityNavigation.nextID(
+            from: currentID,
+            in: treemapAccessibilityNodes,
+            direction: direction
+        ) ?? currentID
+
+        setKeyboardFocus(to: nextID)
+    }
+
+    private func setKeyboardFocus(to rectID: UUID?) {
+        guard let rectID, activeRect(for: rectID) != nil else {
+            keyboardFocusedRectID = nil
+            accessibilityFocusedRectID = nil
+            return
+        }
+
+        keyboardFocusedRectID = rectID
+        accessibilityFocusedRectID = rectID
+    }
+
+    private func accessibilityValue(for rect: TreemapRect) -> String {
+        VisualizationAccessibilityFormatter.treemapValue(
+            sizeText: rect.node.formattedSize,
+            part: rect.node.size,
+            parent: rect.parentSize
+        )
+    }
+
+    private func activateTreemapNode(_ node: FileNode) {
+        guard node.isDirectory, !incrementalScanInProgress, deletionAnimation == nil else {
+            return
+        }
+
+        onSelect(node)
+    }
+
+    @ViewBuilder
+    private func treemapAccessibilityChildren() -> some View {
+        ForEach(cachedRects) { rect in
+            treemapAccessibilityProxy(for: rect)
+        }
+    }
+
+    @ViewBuilder
+    private func treemapAccessibilityProxy(for rect: TreemapRect) -> some View {
+        let proxy = Color.clear
+            .frame(
+                width: max(rect.displayRect.width, 1),
+                height: max(rect.displayRect.height, 1)
+            )
+            .position(x: rect.displayRect.midX, y: rect.displayRect.midY)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(rect.node.name)
+            .accessibilityValue(accessibilityValue(for: rect))
+            .accessibilityFocused($accessibilityFocusedRectID, equals: rect.id)
+
+        if rect.node.isDirectory {
+            proxy
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction(named: Text("Open folder")) {
+                    activateTreemapNode(rect.node)
+                }
+        } else {
+            proxy
+        }
+    }
+
     private func isAnimatingRemoval(for node: FileNode) -> Bool {
         deletionAnimation?.targetNode.containsNode(withID: node.id) == true
     }
@@ -893,6 +1039,17 @@ struct TreemapView: View {
 private struct RenderedTreemapRect {
     let rect: TreemapRect
     let opacity: Double
+}
+
+private enum TreemapHighlightSource {
+    case hover
+    case keyboard
+    case treeSelection
+}
+
+private struct TreemapHighlightState {
+    let node: FileNode
+    let source: TreemapHighlightSource
 }
 
 private struct TreemapDeletionAnimation {

@@ -12,6 +12,35 @@ struct TreemapRect: Identifiable {
     let node: FileNode
     let depth: Int
     let color: Color  // Pre-computed color
+    let parentID: UUID?
+    let parentName: String
+    let parentSize: UInt64
+
+    init(
+        id: UUID,
+        x: Double,
+        y: Double,
+        width: Double,
+        height: Double,
+        node: FileNode,
+        depth: Int,
+        color: Color,
+        parentID: UUID? = nil,
+        parentName: String? = nil,
+        parentSize: UInt64? = nil
+    ) {
+        self.id = id
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.node = node
+        self.depth = depth
+        self.color = color
+        self.parentID = parentID
+        self.parentName = parentName ?? node.name
+        self.parentSize = parentSize ?? node.size
+    }
 
     var cgRect: CGRect {
         CGRect(x: x, y: y, width: width, height: height)
@@ -39,7 +68,10 @@ struct TreemapRect: Identifiable {
             height: max(0, height - amount * 2),
             node: node,
             depth: depth,
-            color: color
+            color: color,
+            parentID: parentID,
+            parentName: parentName,
+            parentSize: parentSize
         )
     }
 }
@@ -119,7 +151,10 @@ enum TreemapLayout {
                         height: length,
                         node: childNode,
                         depth: depth,
-                        color: color
+                        color: color,
+                        parentID: node.id,
+                        parentName: node.name,
+                        parentSize: node.size
                     )
                 } else {
                     rect = TreemapRect(
@@ -130,7 +165,10 @@ enum TreemapLayout {
                         height: rowLength,
                         node: childNode,
                         depth: depth,
-                        color: color
+                        color: color,
+                        parentID: node.id,
+                        parentName: node.name,
+                        parentSize: node.size
                     )
                 }
 

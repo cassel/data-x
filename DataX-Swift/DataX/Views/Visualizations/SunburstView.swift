@@ -6,7 +6,10 @@ struct SunburstView: View {
     let onSelect: (FileNode) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @AccessibilityFocusState private var accessibilityFocusedArcID: UUID?
+    @FocusState private var isSunburstFocused: Bool
     @State private var hoveredNode: FileNode?
+    @State private var keyboardFocusedArcID: UUID?
     @State private var drillTransform = SunburstChartTransform.identity
     @State private var pendingNavigation: PendingSunburstNavigation?
     @State private var isDrillNavigating = false
@@ -24,6 +27,9 @@ struct SunburstView: View {
         let innerRadius: CGFloat
         let outerRadius: CGFloat
         let depth: Int
+        let parentID: UUID?
+        let parentName: String
+        let parentSize: UInt64
 
         init(
             node: FileNode,
@@ -31,7 +37,10 @@ struct SunburstView: View {
             endAngle: Double,
             innerRadius: CGFloat,
             outerRadius: CGFloat,
-            depth: Int
+            depth: Int,
+            parentID: UUID? = nil,
+            parentName: String? = nil,
+            parentSize: UInt64? = nil
         ) {
             self.id = node.id
             self.node = node
@@ -40,6 +49,9 @@ struct SunburstView: View {
             self.innerRadius = innerRadius
             self.outerRadius = outerRadius
             self.depth = depth
+            self.parentID = parentID
+            self.parentName = parentName ?? node.name
+            self.parentSize = parentSize ?? node.size
         }
     }
 
@@ -98,6 +110,17 @@ struct SunburstView: View {
             .onChange(of: node.id) { _, newNodeID in
                 handleNodeChange(newNodeID: newNodeID)
             }
+            .onChange(of: arcData.map(\.id)) { _, _ in
+                syncKeyboardFocus(with: arcData)
+            }
+            .onChange(of: accessibilityFocusedArcID) { _, newValue in
+                guard let newValue, arcData.contains(where: { $0.id == newValue }) else {
+                    keyboardFocusedArcID = nil
+                    return
+                }
+
+                keyboardFocusedArcID = newValue
+            }
             .onDisappear {
                 resetDrillTransition()
             }
@@ -107,6 +130,8 @@ struct SunburstView: View {
 
     private func handleNodeChange(newNodeID: UUID) {
         hoveredNode = nil
+        keyboardFocusedArcID = nil
+        accessibilityFocusedArcID = nil
         resetZoom(animated: false)
 
         guard let pendingNavigation,
@@ -186,6 +211,66 @@ struct SunburstView: View {
         }
     }
 
+    private func syncKeyboardFocus(with arcs: [ArcData]) {
+        guard let keyboardFocusedArcID else { return }
+        guard arcs.contains(where: { $0.id == keyboardFocusedArcID }) else {
+            self.keyboardFocusedArcID = nil
+            accessibilityFocusedArcID = nil
+            return
+        }
+    }
+
+    private func accessibilityValue(for arc: ArcData) -> String {
+        VisualizationAccessibilityFormatter.sunburstValue(
+            sizeText: arc.node.formattedSize,
+            depth: arc.depth,
+            part: arc.node.size,
+            parent: arc.parentSize
+        )
+    }
+
+    private func infoNode(for arcs: [ArcData]) -> FileNode? {
+        if let hoveredNode {
+            return hoveredNode
+        }
+
+        return arcs.first(where: { $0.id == keyboardFocusedArcID })?.node
+    }
+
+    private func handleMoveCommand(
+        _ moveDirection: MoveCommandDirection,
+        arcs: [ArcData]
+    ) {
+        guard let direction = VisualizationKeyboardDirection(moveDirection) else { return }
+
+        let accessibilityNodes = arcs.map {
+            SunburstAccessibilityNode(
+                id: $0.id,
+                depth: $0.depth,
+                startAngle: $0.startAngle,
+                endAngle: $0.endAngle,
+                parentID: $0.parentID
+            )
+        }
+
+        guard !accessibilityNodes.isEmpty else { return }
+
+        let currentID = keyboardFocusedArcID
+            ?? hoveredNode?.id
+            ?? accessibilityNodes.first?.id
+
+        guard let currentID else { return }
+
+        let nextID = SunburstAccessibilityNavigation.nextID(
+            from: currentID,
+            in: accessibilityNodes,
+            direction: direction
+        ) ?? currentID
+
+        keyboardFocusedArcID = nextID
+        accessibilityFocusedArcID = nextID
+    }
+
     @ViewBuilder
     private func interactiveContent(
         arcs: [ArcData],
@@ -219,14 +304,19 @@ struct SunburstView: View {
         .opacity(drillTransform.opacity)
         .scaleEffect(effectiveZoomScale, anchor: effectiveZoomAnchor)
         .overlay(alignment: .topLeading) {
-            if let hoveredNode {
+            if let infoNode = infoNode(for: arcs) {
                 SunburstHoverOverlay(
                     rootNode: node,
-                    hoveredNode: hoveredNode
+                    hoveredNode: infoNode
                 )
                 .padding()
             }
         }
+        .focusable()
+        .focused($isSunburstFocused)
+        .onMoveCommand { handleMoveCommand($0, arcs: arcs) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Sunburst visualization")
         .simultaneousGesture(magnifyGesture)
 
         if shouldPreferResetDoubleTap {
@@ -246,7 +336,8 @@ struct SunburstView: View {
             SunburstArc(
                 arc: arc,
                 center: center,
-                isHovered: hoveredNode?.id == arc.node.id
+                isHovered: hoveredNode?.id == arc.node.id,
+                isKeyboardFocused: keyboardFocusedArcID == arc.node.id
             )
 
             if let layout = SunburstLabelPolicy.makeLayout(for: arc, center: center) {
@@ -254,6 +345,10 @@ struct SunburstView: View {
                     .allowsHitTesting(false)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(arc.node.name)
+        .accessibilityValue(accessibilityValue(for: arc))
+        .accessibilityFocused($accessibilityFocusedArcID, equals: arc.id)
         .onHover { isHovered in
             guard !isDrillNavigating else {
                 hoveredNode = nil
@@ -263,11 +358,30 @@ struct SunburstView: View {
             hoveredNode = isHovered ? arc.node : nil
         }
 
-        if shouldPreferResetDoubleTap {
-            content
+        if arc.node.isDirectory {
+            if shouldPreferResetDoubleTap {
+                content
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction(named: Text("Open folder")) {
+                        beginDrillDown(on: arc, in: viewSize)
+                    }
+            } else {
+                content
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction(named: Text("Open folder")) {
+                        beginDrillDown(on: arc, in: viewSize)
+                    }
+                    .onTapGesture(count: 2) {
+                        beginDrillDown(on: arc, in: viewSize)
+                    }
+            }
         } else {
-            content.onTapGesture(count: 2) {
-                beginDrillDown(on: arc, in: viewSize)
+            if shouldPreferResetDoubleTap {
+                content
+            } else {
+                content.onTapGesture(count: 2) {
+                    beginDrillDown(on: arc, in: viewSize)
+                }
             }
         }
     }
@@ -296,7 +410,10 @@ struct SunburstView: View {
                         endAngle: childEndAngle,
                         innerRadius: innerRadius + CGFloat(depth) * ringWidth,
                         outerRadius: innerRadius + CGFloat(depth + 1) * ringWidth - 1,
-                        depth: depth
+                        depth: depth,
+                        parentID: node.id,
+                        parentName: node.name,
+                        parentSize: node.size
                     )
                     result.append(arc)
 
@@ -634,6 +751,7 @@ struct SunburstArc: View {
     let arc: SunburstView.ArcData
     let center: CGPoint
     let isHovered: Bool
+    let isKeyboardFocused: Bool
 
     var body: some View {
         let path = arc.path(center: center)
@@ -641,10 +759,25 @@ struct SunburstArc: View {
         path
             .fill(arcColor)
             .overlay {
-                path.stroke(
-                    isHovered ? Color.white : Color.white.opacity(0.3),
-                    lineWidth: isHovered ? 2 : 0.5
-                )
+                if isHovered {
+                    path.stroke(
+                        Color.white,
+                        lineWidth: 2
+                    )
+                } else if isKeyboardFocused {
+                    ZStack {
+                        path.stroke(Color.white, lineWidth: 3.5)
+                        path.stroke(
+                            Color.black.opacity(0.72),
+                            style: StrokeStyle(lineWidth: 1.2, dash: [6, 4])
+                        )
+                    }
+                } else {
+                    path.stroke(
+                        Color.white.opacity(0.3),
+                        lineWidth: 0.5
+                    )
+                }
             }
     }
 
