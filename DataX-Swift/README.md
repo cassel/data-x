@@ -23,7 +23,7 @@ datax --tui
 ## Features
 
 - **Treemap Visualization** - Squarify algorithm, 6 levels deep, color-coded by file type
-- **Multiple Views** - Treemap, Sunburst, Icicle, Bar Chart, Circle Packing
+- **Multiple Views** - Treemap and Sunburst
 - **File Tree Browser** - Searchable sidebar with breadcrumb navigation
 - **Smart Interaction**:
   - Single click in tree = Highlight in treemap (cyan border)
@@ -59,9 +59,7 @@ DataX/
 │   ├── Visualizations/
 │   │   ├── TreemapView.swift    # Canvas + caching
 │   │   ├── SunburstView.swift
-│   │   ├── IcicleView.swift
-│   │   ├── BarChartView.swift
-│   │   └── CirclePackingView.swift
+│   │   └── TreemapLayerView.swift
 │   └── FileTree/
 │       └── FileTreeView.swift
 └── Utilities/

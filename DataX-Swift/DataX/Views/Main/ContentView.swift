@@ -371,13 +371,13 @@ struct ContentView: View {
             return .treemap
         }
 
-        return state.selectedVisualization == .fileTree ? .treemap : state.selectedVisualization
+        return state.selectedVisualization
     }
 
     private func preservesVisualizationIdentity(
         for visualization: AppState.VisualizationType
     ) -> Bool {
-        visualization == .treemap || visualization == .fileTree
+        visualization == .treemap
     }
 
     @ViewBuilder
@@ -436,22 +436,6 @@ struct ContentView: View {
             )
         case .sunburst:
             SunburstView(node: node) { navigate(to: $0) }
-        case .icicle:
-            IcicleView(node: node) { navigate(to: $0) }
-        case .barChart:
-            BarChartView(node: node) { navigate(to: $0) }
-        case .circlePacking:
-            CirclePackingView(node: node) { navigate(to: $0) }
-        case .fileTree:
-            TreemapView(
-                node: node,
-                highlightedNode: appState.highlightedNode,
-                onSelect: { navigate(to: $0) },
-                layoutRevision: treeMutationRevision,
-                incrementalScanInProgress: appState.scannerViewModel.isIncrementalScanInProgress,
-                onMoveToTrash: { appState.scannerViewModel.beginMoveToTrash($0) },
-                onCommitMoveToTrash: commitMoveToTrash
-            )
         }
     }
 

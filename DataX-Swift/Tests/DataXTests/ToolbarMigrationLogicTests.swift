@@ -2,10 +2,35 @@ import XCTest
 @testable import DataX
 
 final class ToolbarMigrationLogicTests: XCTestCase {
-    func testToolbarOptionsExcludeFileTreeAndKeepUserFacingOrder() {
+    @MainActor
+    func testAppStateDefaultsToTreemapVisualization() {
+        let appState = AppState()
+
+        XCTAssertEqual(appState.selectedVisualization, .treemap)
+    }
+
+    func testVisualizationModesAreReducedToTreemapAndSunburst() {
+        XCTAssertEqual(
+            AppState.VisualizationType.allCases,
+            [.treemap, .sunburst]
+        )
+    }
+
+    func testToolbarOptionsKeepOnlySupportedUserFacingOrder() {
         XCTAssertEqual(
             AppState.VisualizationType.toolbarOptions,
-            [.treemap, .sunburst, .icicle, .barChart, .circlePacking]
+            [.treemap, .sunburst]
+        )
+    }
+
+    func testSupportedVisualizationLabelsAndIconsRemainStable() {
+        XCTAssertEqual(
+            AppState.VisualizationType.toolbarOptions.map(\.rawValue),
+            ["Treemap", "Sunburst"]
+        )
+        XCTAssertEqual(
+            AppState.VisualizationType.toolbarOptions.map(\.icon),
+            ["square.grid.2x2", "sun.max"]
         )
     }
 

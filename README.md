@@ -6,7 +6,7 @@ A fast, visual disk space analyzer with modern GUI and TUI interfaces.
 
 ## Features
 
-- **Multiple Visualizations**: Treemap, Sunburst, Icicle, Bar Chart, Circle Packing
+- **Multiple Visualizations**: Treemap and Sunburst
 - **Dual Interface**: Modern GUI (Tauri + React) and Terminal UI (TUI)
 - **Fast Scanning**: Parallel directory scanning with real-time progress
 - **Cross-Platform**: macOS, Windows, Linux

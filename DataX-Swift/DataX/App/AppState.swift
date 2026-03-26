@@ -35,25 +35,17 @@ final class AppState {
     enum VisualizationType: String, CaseIterable, Identifiable {
         case treemap = "Treemap"
         case sunburst = "Sunburst"
-        case icicle = "Icicle"
-        case barChart = "Bar Chart"
-        case circlePacking = "Circle Packing"
-        case fileTree = "File Tree"
 
         var id: String { rawValue }
 
         static var toolbarOptions: [Self] {
-            [.treemap, .sunburst, .icicle, .barChart, .circlePacking]
+            [.treemap, .sunburst]
         }
 
         var icon: String {
             switch self {
             case .treemap: return "square.grid.2x2"
             case .sunburst: return "sun.max"
-            case .icicle: return "chart.bar.xaxis"
-            case .barChart: return "chart.bar"
-            case .circlePacking: return "circle.hexagongrid"
-            case .fileTree: return "list.bullet.indent"
             }
         }
     }
