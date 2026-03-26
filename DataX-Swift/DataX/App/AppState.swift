@@ -64,11 +64,24 @@ final class AppState {
         selectedVisualization = visualization
     }
 
+    func selectInsight(_ node: FileNode) {
+        guard let rootNode = scannerViewModel.rootNode,
+              !scannerViewModel.isScanning,
+              rootNode.containsNode(withID: node.id) else {
+            return
+        }
+
+        selectedVisualization = .treemap
+        scannerViewModel.navigateToRoot()
+        highlightedNode = node
+    }
+
     func returnHome() {
         scannerViewModel.rootNode = nil
         scannerViewModel.currentNode = nil
         scannerViewModel.navigationStack = []
         scannerViewModel.diskInfo = nil
+        scannerViewModel.insights = .empty
         lastScannedURL = nil
         highlightedNode = nil
     }

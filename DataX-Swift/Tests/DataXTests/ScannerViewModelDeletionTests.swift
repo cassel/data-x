@@ -15,6 +15,7 @@ final class ScannerViewModelDeletionTests: XCTestCase {
         viewModel.navigationStack = [root, folder]
         viewModel.searchQuery = "txt"
         viewModel.searchResults = [target, keep]
+        viewModel.refreshInsightRankings()
 
         viewModel.commitMoveToTrash(target)
 
@@ -26,6 +27,8 @@ final class ScannerViewModelDeletionTests: XCTestCase {
         XCTAssertEqual(viewModel.currentNode?.id, folder.id)
         XCTAssertEqual(viewModel.navigationStack.map(\.id), [root.id, folder.id])
         XCTAssertEqual(viewModel.searchResults.map(\.id), [keep.id])
+        XCTAssertEqual(viewModel.insights.topFiles.map(\.id), [keep.id])
+        XCTAssertEqual(viewModel.insights.topDirectories.map(\.id), [folder.id])
         XCTAssertEqual(viewModel.treeMutationRevision, 1)
     }
 

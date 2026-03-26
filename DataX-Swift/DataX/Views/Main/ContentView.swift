@@ -345,6 +345,8 @@ struct ContentView: View {
                 }
                 .help(isLegendVisible ? "Hide File Type Legend" : "Show File Type Legend")
 
+                InsightsToolbarPopoverButton()
+
                 SSHToolbarPopoverButton()
 
                 if let node = state.scannerViewModel.currentNode ?? state.scannerViewModel.rootNode {

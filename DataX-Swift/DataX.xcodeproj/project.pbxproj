@@ -28,6 +28,7 @@
 		8E3C7A9B1F244C6AA2D7E1F5 /* ScanEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74B1E6C3D94A4F6F8E2C1B7A /* ScanEvent.swift */; };
 		9762A6933EEC94ECCD5D688C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E1CE0587AA6C4BFC28A455 /* ContentView.swift */; };
 		9DEAA80264B7F320DA27530C /* SSHConnectionModal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4C91991DAB418A6E1227B37 /* SSHConnectionModal.swift */; };
+		A1B2C3D4E5F60718293A4B5C /* InsightsPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5D /* InsightsPopover.swift */; };
 		A7E959C1CF10F7F7838BF920 /* FileCategory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FF7262ECBECD09DD652AA8 /* FileCategory.swift */; };
 		A13F9E5C7B284C91B4D0E6F1 /* TreemapSpatialIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6E2F4901A7B4C3D9E8F2056 /* TreemapSpatialIndex.swift */; };
 		B12489498EFF405260FFB0F3 /* ColorPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = D67061EBA6A3D2C87875DCA5 /* ColorPalette.swift */; };
@@ -67,6 +68,7 @@
 		84ECCFB4499E7CC306F81347 /* SunburstView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SunburstView.swift; sourceTree = "<group>"; };
 		98C9E9A5BC7A24E1F387A98F /* DataX.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DataX.entitlements; sourceTree = "<group>"; };
 		A4C91991DAB418A6E1227B37 /* SSHConnectionModal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConnectionModal.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5D /* InsightsPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsPopover.swift; sourceTree = "<group>"; };
 		B46F587C76B467E3E39FB989 /* DiskInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskInfo.swift; sourceTree = "<group>"; };
 		B9FF7262ECBECD09DD652AA8 /* FileCategory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileCategory.swift; sourceTree = "<group>"; };
 		BEC0AC2866E75A8867DC132C /* FilterViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterViewModel.swift; sourceTree = "<group>"; };
@@ -156,6 +158,7 @@
 			isa = PBXGroup;
 			children = (
 				2F3A4B5C6D7E8F901A2B3C4D /* FileTypeLegendOverlay.swift */,
+				A1B2C3D4E5F60718293A4B5D /* InsightsPopover.swift */,
 				3F4A5B6C7D8E9F001A2B3C4D /* SSHToolbarPopover.swift */,
 			);
 			path = Toolbar;
@@ -362,6 +365,7 @@
 				4A2AA4815B97D1C26A5B8B9A /* FilterViewModel.swift in Sources */,
 				0F1A2B3C4D5E6F708192A3B4 /* FileTypeLegendOverlay.swift in Sources */,
 				3236E5427A2D48D01DEEB6DB /* HeaderView.swift in Sources */,
+				A1B2C3D4E5F60718293A4B5C /* InsightsPopover.swift in Sources */,
 				25BDFB41A51D3B6C3C227BBB /* SSHConnection.swift in Sources */,
 				9DEAA80264B7F320DA27530C /* SSHConnectionModal.swift in Sources */,
 				4214395CD92041668DC46797 /* SSHConnectionStore.swift in Sources */,

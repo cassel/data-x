@@ -2,6 +2,28 @@ import XCTest
 @testable import DataX
 
 final class TreemapLayerRendererTests: XCTestCase {
+    func testTreemapBlockLayerSupportsCoreAnimationCopies() {
+        let layer = TreemapBlockLayer()
+        layer.apply(
+            rect: CGRect(x: 10, y: 20, width: 80, height: 60),
+            style: TreemapShadingStyle(
+                fillColor: .blue,
+                gradientStartColor: .white,
+                gradientEndColor: .blue
+            ),
+            depth: 0,
+            opacity: 0.75
+        )
+        layer.updateContentsScale(2)
+
+        let copy = TreemapBlockLayer(layer: layer)
+
+        XCTAssertEqual(copy.frame, layer.frame)
+        XCTAssertEqual(copy.opacity, layer.opacity)
+        XCTAssertEqual(copy.contentsScale, 2)
+        XCTAssertEqual(copy.sublayers?.count, 2)
+    }
+
     func testOverlayPlanPrefersHoveredNodeAndDimsSiblingTopLevelRects() {
         let rootA = makeRect(path: "/root/A", depth: 0, x: 0, y: 0, width: 120, height: 120)
         let rootB = makeRect(path: "/root/B", depth: 0, x: 120, y: 0, width: 120, height: 120)

@@ -1,6 +1,63 @@
 import Foundation
 import SwiftUI
 
+struct ScanInsights: Equatable {
+    let topFiles: [FileNode]
+    let topDirectories: [FileNode]
+
+    static let empty = Self(topFiles: [], topDirectories: [])
+
+    static func make(
+        from root: FileNode,
+        topFilesLimit: Int = 10,
+        topDirectoryLimit: Int = 5
+    ) -> Self {
+        var topFiles: [FileNode] = []
+        var topDirectories: [FileNode] = []
+
+        func rankKey(for node: FileNode) -> (UInt64, String) {
+            (node.size, node.path.standardizedFileURL.path)
+        }
+
+        func insert(_ node: FileNode, into rankings: inout [FileNode], limit: Int) {
+            guard limit > 0 else { return }
+
+            rankings.append(node)
+            rankings.sort { lhs, rhs in
+                let lhsKey = rankKey(for: lhs)
+                let rhsKey = rankKey(for: rhs)
+
+                if lhsKey.0 != rhsKey.0 {
+                    return lhsKey.0 > rhsKey.0
+                }
+
+                return lhsKey.1 < rhsKey.1
+            }
+
+            if rankings.count > limit {
+                rankings.removeLast(rankings.count - limit)
+            }
+        }
+
+        func walk(_ node: FileNode, isRoot: Bool) {
+            if node.isDirectory {
+                if !isRoot {
+                    insert(node, into: &topDirectories, limit: topDirectoryLimit)
+                }
+
+                for child in node.children ?? [] {
+                    walk(child, isRoot: false)
+                }
+            } else {
+                insert(node, into: &topFiles, limit: topFilesLimit)
+            }
+        }
+
+        walk(root, isRoot: true)
+        return Self(topFiles: topFiles, topDirectories: topDirectories)
+    }
+}
+
 @MainActor
 @Observable
 final class ScannerViewModel {
@@ -14,6 +71,7 @@ final class ScannerViewModel {
     var progress: ScanProgress?
     var diskInfo: DiskInfo?
     var error: Error?
+    var insights = ScanInsights.empty
     var searchQuery = ""
     var searchResults: [FileNode] = []
     var treeMutationRevision = 0
@@ -76,6 +134,7 @@ final class ScannerViewModel {
             isComplete: false
         )
         resetSearch()
+        resetInsightRankings()
         diskInfo = try? DiskInfo.forPath(standardizedDirectory)
         prepareIncrementalRoot(for: standardizedDirectory)
 
@@ -189,6 +248,17 @@ final class ScannerViewModel {
         searchResults = []
     }
 
+    func refreshInsightRankings() {
+        guard !isScanning,
+              !isIncrementalScanInProgress,
+              let rootNode else {
+            insights = .empty
+            return
+        }
+
+        insights = ScanInsights.make(from: rootNode)
+    }
+
     // MARK: - File Operations
 
     func revealInFinder(_ node: FileNode) {
@@ -249,6 +319,7 @@ final class ScannerViewModel {
         isScanning = true
         isIncrementalScanInProgress = false
         error = nil
+        resetInsightRankings()
         progress = .initial
         resetSearch()
     }
@@ -264,6 +335,7 @@ final class ScannerViewModel {
         isScanning = false
         isIncrementalScanInProgress = false
         error = nil
+        refreshInsightRankings()
         treeMutationRevision += 1
     }
 
@@ -271,6 +343,7 @@ final class ScannerViewModel {
         self.error = error
         isScanning = false
         isIncrementalScanInProgress = false
+        resetInsightRankings()
         progress = nil
     }
 
@@ -380,6 +453,7 @@ final class ScannerViewModel {
         isScanning = false
         isIncrementalScanInProgress = false
         error = nil
+        refreshInsightRankings()
         treeMutationRevision += 1
 
         finishLocalScan(sessionID: sessionID)
@@ -407,6 +481,10 @@ final class ScannerViewModel {
         searchResults = []
     }
 
+    private func resetInsightRankings() {
+        insights = .empty
+    }
+
     private func anchorNavigationToRoot() {
         guard isIncrementalScanInProgress, let rootNode else { return }
 
@@ -429,6 +507,8 @@ final class ScannerViewModel {
         if hadVisibleTree {
             treeMutationRevision += 1
         }
+
+        resetInsightRankings()
     }
 
     private func standardizedPath(for url: URL) -> String {
@@ -514,6 +594,7 @@ final class ScannerViewModel {
             navigationStack = []
             searchQuery = ""
             searchResults = []
+            resetInsightRankings()
             treeMutationRevision += 1
             return
         }
@@ -539,6 +620,7 @@ final class ScannerViewModel {
             searchResults = []
         }
 
+        refreshInsightRankings()
         treeMutationRevision += 1
     }
 

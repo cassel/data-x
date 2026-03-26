@@ -584,30 +584,59 @@ final class TreemapLayerHostingView: NSView {
     }
 }
 
-private final class TreemapBlockLayer: CALayer {
+final class TreemapBlockLayer: CALayer {
     private let gradientLayer = CAGradientLayer()
     private let borderLayer = CAShapeLayer()
     private let maskLayer = CAShapeLayer()
 
     override init() {
         super.init()
+        configureSublayers()
+    }
 
-        isGeometryFlipped = true
-        gradientLayer.isGeometryFlipped = true
-        borderLayer.isGeometryFlipped = true
+    override init(layer: Any) {
+        super.init(layer: layer)
+        configureSublayers()
 
-        gradientLayer.startPoint = CGPoint(x: 0, y: 0)
-        gradientLayer.endPoint = CGPoint(x: 1, y: 1)
-        gradientLayer.mask = maskLayer
+        guard let other = layer as? TreemapBlockLayer else { return }
 
-        borderLayer.fillColor = nil
+        frame = other.frame
+        opacity = other.opacity
+        gradientLayer.frame = other.gradientLayer.frame
+        gradientLayer.colors = other.gradientLayer.colors
 
-        addSublayer(gradientLayer)
-        addSublayer(borderLayer)
+        maskLayer.frame = other.maskLayer.frame
+        maskLayer.path = other.maskLayer.path
+
+        borderLayer.frame = other.borderLayer.frame
+        borderLayer.path = other.borderLayer.path
+        borderLayer.strokeColor = other.borderLayer.strokeColor
+        borderLayer.lineWidth = other.borderLayer.lineWidth
+
+        updateContentsScale(other.contentsScale)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    private func configureSublayers() {
+        isGeometryFlipped = true
+
+        sublayers?.forEach { $0.removeFromSuperlayer() }
+
+        gradientLayer.isGeometryFlipped = true
+        gradientLayer.startPoint = CGPoint(x: 0, y: 0)
+        gradientLayer.endPoint = CGPoint(x: 1, y: 1)
+        gradientLayer.mask = maskLayer
+
+        borderLayer.isGeometryFlipped = true
+        borderLayer.fillColor = nil
+
+        maskLayer.isGeometryFlipped = true
+
+        addSublayer(gradientLayer)
+        addSublayer(borderLayer)
     }
 
     func apply(
