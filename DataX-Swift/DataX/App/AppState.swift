@@ -20,6 +20,7 @@ enum FolderIntake {
     }
 }
 
+@MainActor
 @Observable
 final class AppState {
     var scannerViewModel = ScannerViewModel()

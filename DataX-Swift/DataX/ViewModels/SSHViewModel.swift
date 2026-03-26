@@ -91,30 +91,31 @@ final class SSHViewModel {
         isConnecting = true
         connectingId = connection.id
         error = nil
-        scannerVM.isScanning = true
-        scannerVM.progress = .initial
+        Task { @MainActor in
+            scannerVM.beginRemoteScan()
+        }
 
         sshService.scanRemote(
             connection: connection,
             path: path,
             progress: { progress in
-                scannerVM.progress = progress
+                Task { @MainActor in
+                    scannerVM.updateRemoteProgress(progress)
+                }
             },
             completion: { [weak self] result in
-                self?.isConnecting = false
-                self?.connectingId = nil
+                Task { @MainActor [weak self] in
+                    self?.isConnecting = false
+                    self?.connectingId = nil
 
-                switch result {
-                case .success(let root):
-                    self?.loadConnections()
-                    scannerVM.rootNode = root
-                    scannerVM.currentNode = root
-                    scannerVM.navigationStack = [root]
-                    scannerVM.isScanning = false
-                case .failure(let err):
-                    scannerVM.error = err
-                    scannerVM.isScanning = false
-                    self?.error = err.localizedDescription
+                    switch result {
+                    case .success(let root):
+                        self?.loadConnections()
+                        scannerVM.completeRemoteScan(with: root)
+                    case .failure(let err):
+                        scannerVM.failRemoteScan(with: err)
+                        self?.error = err.localizedDescription
+                    }
                 }
             }
         )

@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 
+@MainActor
 @Observable
 final class ScannerViewModel {
     // MARK: - State
@@ -18,7 +19,10 @@ final class ScannerViewModel {
 
     // MARK: - Private
 
-    private let scanner = ScannerService()
+    @ObservationIgnored private var scanner = ScannerService()
+    @ObservationIgnored private var scanTask: Task<Void, Never>?
+    @ObservationIgnored private var progressTask: Task<Void, Never>?
+    @ObservationIgnored private var activeScanSessionID: UUID?
 
     // MARK: - Computed Properties
 
@@ -44,39 +48,70 @@ final class ScannerViewModel {
     // MARK: - Actions
 
     func scan(directory: URL) {
+        cancelActiveLocalScan(resetScanningState: false)
+
+        let sessionID = UUID()
+        let startTime = Date()
+        let directoryName = Self.displayName(for: directory)
+        let scanner = ScannerService()
+
+        self.scanner = scanner
+        activeScanSessionID = sessionID
         isScanning = true
         error = nil
-        progress = .initial
-        searchQuery = ""
-        searchResults = []
+        progress = ScanProgress(
+            filesScanned: 0,
+            directoriesScanned: 0,
+            bytesScanned: 0,
+            currentPath: directoryName,
+            startTime: startTime,
+            isComplete: false
+        )
+        resetSearch()
 
         // Get disk info (simplified method that won't hang)
         diskInfo = try? DiskInfo.forPath(directory)
 
-        // Start scan with callbacks
-        scanner.scan(
-            directory: directory,
-            progress: { [weak self] newProgress in
-                self?.progress = newProgress
-            },
-            completion: { [weak self] result in
-                switch result {
-                case .success(let root):
-                    self?.rootNode = root
-                    self?.currentNode = root
-                    self?.navigationStack = [root]
-                    self?.isScanning = false
-                case .failure(let error):
-                    self?.error = error
-                    self?.isScanning = false
-                }
+        var progressContinuation: AsyncStream<ScanProgress>.Continuation!
+        let progressStream = AsyncStream<ScanProgress>(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            progressContinuation = continuation
+        }
+
+        let progressTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            for await update in progressStream {
+                guard self.activeScanSessionID == sessionID else { continue }
+                self.progress = update
             }
-        )
+        }
+        self.progressTask = progressTask
+
+        scanTask = Task { [weak self, scanner] in
+            guard let self else {
+                progressContinuation.finish()
+                return
+            }
+
+            do {
+                let result = try await scanner.scan(
+                    directory: directory,
+                    progress: progressContinuation
+                )
+                await progressTask.value
+                self.completeLocalScan(with: result, sessionID: sessionID)
+            } catch is CancellationError {
+                await progressTask.value
+                self.finishCancelledLocalScan(sessionID: sessionID)
+            } catch {
+                await progressTask.value
+                self.finishFailedLocalScan(error, sessionID: sessionID)
+            }
+        }
     }
 
     func cancelScan() {
-        scanner.cancel()
-        isScanning = false
+        cancelActiveLocalScan(resetScanningState: true)
     }
 
     func navigateTo(_ node: FileNode) {
@@ -202,7 +237,103 @@ final class ScannerViewModel {
         FileOperationsService.copyPath(node.path)
     }
 
+    func beginRemoteScan() {
+        cancelActiveLocalScan(resetScanningState: false)
+        isScanning = true
+        error = nil
+        progress = .initial
+        resetSearch()
+    }
+
+    func updateRemoteProgress(_ newProgress: ScanProgress) {
+        progress = newProgress
+    }
+
+    func completeRemoteScan(with root: FileNode) {
+        rootNode = root
+        currentNode = root
+        navigationStack = [root]
+        isScanning = false
+        error = nil
+    }
+
+    func failRemoteScan(with error: Error) {
+        self.error = error
+        isScanning = false
+        progress = nil
+    }
+
     // MARK: - Private Helpers
+
+    private static func displayName(for directory: URL) -> String {
+        let name = directory.lastPathComponent
+        return name.isEmpty ? directory.path : name
+    }
+
+    private func cancelActiveLocalScan(resetScanningState: Bool) {
+        let scanner = self.scanner
+        let scanTask = self.scanTask
+        let progressTask = self.progressTask
+
+        activeScanSessionID = nil
+        self.scanTask = nil
+        self.progressTask = nil
+
+        scanTask?.cancel()
+        progressTask?.cancel()
+
+        Task {
+            await scanner.cancel()
+        }
+
+        if resetScanningState {
+            isScanning = false
+            progress = nil
+        }
+    }
+
+    private func completeLocalScan(with result: FileNodeData, sessionID: UUID) {
+        guard activeScanSessionID == sessionID else { return }
+
+        let root = result.toFileNode()
+        rootNode = root
+        currentNode = root
+        navigationStack = [root]
+        isScanning = false
+        error = nil
+
+        finishLocalScan(sessionID: sessionID)
+    }
+
+    private func finishCancelledLocalScan(sessionID: UUID) {
+        guard activeScanSessionID == sessionID else { return }
+
+        isScanning = false
+        progress = nil
+        finishLocalScan(sessionID: sessionID)
+    }
+
+    private func finishFailedLocalScan(_ error: Error, sessionID: UUID) {
+        guard activeScanSessionID == sessionID else { return }
+
+        self.error = error
+        isScanning = false
+        progress = nil
+        finishLocalScan(sessionID: sessionID)
+    }
+
+    private func finishLocalScan(sessionID: UUID) {
+        guard activeScanSessionID == sessionID else { return }
+
+        activeScanSessionID = nil
+        scanTask = nil
+        progressTask = nil
+    }
+
+    private func resetSearch() {
+        searchQuery = ""
+        searchResults = []
+    }
 
     private func commitNodeRemoval(_ node: FileNode) {
         pruneSearchResults(removing: node)

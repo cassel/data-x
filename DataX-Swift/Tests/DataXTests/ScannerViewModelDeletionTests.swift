@@ -1,6 +1,7 @@
 import XCTest
 @testable import DataX
 
+@MainActor
 final class ScannerViewModelDeletionTests: XCTestCase {
     func testCommitMoveToTrashRemovesNodeUpdatesAncestorsAndPrunesSearchResults() {
         let viewModel = ScannerViewModel()

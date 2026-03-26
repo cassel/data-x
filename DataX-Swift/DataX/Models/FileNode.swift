@@ -149,8 +149,28 @@ struct FileNodeData: Sendable {
     let isSymlink: Bool
     let size: UInt64
     let modificationDate: Date?
+    let fileCount: Int
     let children: [FileNodeData]?
 
+    init(
+        url: URL,
+        isDirectory: Bool,
+        isSymlink: Bool,
+        size: UInt64,
+        modificationDate: Date?,
+        fileCount: Int? = nil,
+        children: [FileNodeData]?
+    ) {
+        self.url = url
+        self.isDirectory = isDirectory
+        self.isSymlink = isSymlink
+        self.size = size
+        self.modificationDate = modificationDate
+        self.children = children
+        self.fileCount = fileCount ?? (isDirectory ? (children?.reduce(0) { $0 + $1.fileCount } ?? 0) : 1)
+    }
+
+    @MainActor
     func toFileNode() -> FileNode {
         let node = FileNode(
             url: url,
@@ -160,7 +180,7 @@ struct FileNodeData: Sendable {
             modificationDate: modificationDate
         )
         node.children = children?.map { $0.toFileNode() }
-        node.fileCount = children?.reduce(0) { $0 + $1.toFileNode().fileCount } ?? (isDirectory ? 0 : 1)
+        node.fileCount = fileCount
         return node
     }
 }
