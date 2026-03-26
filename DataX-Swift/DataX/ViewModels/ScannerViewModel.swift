@@ -1,19 +1,76 @@
 import Foundation
 import SwiftUI
 
+struct OldFileInsights: Equatable {
+    struct DirectoryGroup: Equatable, Identifiable {
+        let directoryPath: String
+        let files: [FileNode]
+
+        var id: String { directoryPath }
+
+        var totalSize: UInt64 {
+            files.reduce(0) { $0 + $1.size }
+        }
+
+        var fileCount: Int {
+            files.count
+        }
+
+        var displayName: String {
+            let name = URL(fileURLWithPath: directoryPath).lastPathComponent
+            return name.isEmpty ? directoryPath : name
+        }
+
+        var fileCountText: String {
+            "\(fileCount) \(fileCount == 1 ? "file" : "files")"
+        }
+    }
+
+    let cutoffDate: Date
+    let directoryGroups: [DirectoryGroup]
+
+    var totalCount: Int {
+        directoryGroups.reduce(0) { $0 + $1.fileCount }
+    }
+
+    var totalSize: UInt64 {
+        directoryGroups.reduce(0) { $0 + $1.totalSize }
+    }
+
+    var hasResults: Bool {
+        !directoryGroups.isEmpty
+    }
+
+    var summaryText: String {
+        "\(totalCount) \(totalCount == 1 ? "file" : "files") (\(SizeFormatter.format(totalSize))) not modified since \(cutoffDate.formatted(date: .abbreviated, time: .omitted))"
+    }
+
+    var emptyStateText: String {
+        "No files older than \(cutoffDate.formatted(date: .abbreviated, time: .omitted))."
+    }
+}
+
 struct ScanInsights: Equatable {
     let topFiles: [FileNode]
     let topDirectories: [FileNode]
+    let oldFiles: OldFileInsights?
 
-    static let empty = Self(topFiles: [], topDirectories: [])
+    static let empty = Self(topFiles: [], topDirectories: [], oldFiles: nil)
 
     static func make(
         from root: FileNode,
         topFilesLimit: Int = 10,
-        topDirectoryLimit: Int = 5
+        topDirectoryLimit: Int = 5,
+        referenceDate: Date = Date(),
+        calendar: Calendar = .current
     ) -> Self {
         var topFiles: [FileNode] = []
         var topDirectories: [FileNode] = []
+        var oldFilesByDirectoryPath: [String: [FileNode]] = [:]
+        let cutoffDate = FilterViewModel.DatePreset.older.cutoffDate(
+            relativeTo: referenceDate,
+            calendar: calendar
+        )
 
         func rankKey(for node: FileNode) -> (UInt64, String) {
             (node.size, node.path.standardizedFileURL.path)
@@ -50,11 +107,47 @@ struct ScanInsights: Equatable {
                 }
             } else {
                 insert(node, into: &topFiles, limit: topFilesLimit)
+
+                if let cutoffDate, node.isOldFile(cutoffDate: cutoffDate) {
+                    let directoryPath = node.path.deletingLastPathComponent().standardizedFileURL.path
+                    oldFilesByDirectoryPath[directoryPath, default: []].append(node)
+                }
             }
         }
 
         walk(root, isRoot: true)
-        return Self(topFiles: topFiles, topDirectories: topDirectories)
+        let oldFiles = cutoffDate.map { cutoffDate in
+            OldFileInsights(
+                cutoffDate: cutoffDate,
+                directoryGroups: oldFilesByDirectoryPath
+                    .map { directoryPath, files in
+                        let sortedFiles = files.sorted { lhs, rhs in
+                            let lhsKey = rankKey(for: lhs)
+                            let rhsKey = rankKey(for: rhs)
+
+                            if lhsKey.0 != rhsKey.0 {
+                                return lhsKey.0 > rhsKey.0
+                            }
+
+                            return lhsKey.1 < rhsKey.1
+                        }
+
+                        return OldFileInsights.DirectoryGroup(
+                            directoryPath: directoryPath,
+                            files: sortedFiles
+                        )
+                    }
+                    .sorted { lhs, rhs in
+                        if lhs.totalSize != rhs.totalSize {
+                            return lhs.totalSize > rhs.totalSize
+                        }
+
+                        return lhs.directoryPath < rhs.directoryPath
+                    }
+            )
+        }
+
+        return Self(topFiles: topFiles, topDirectories: topDirectories, oldFiles: oldFiles)
     }
 }
 

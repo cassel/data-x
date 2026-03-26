@@ -92,6 +92,119 @@ final class ToolbarMigrationLogicTests: XCTestCase {
         XCTAssertTrue(insights.topDirectories.isEmpty)
     }
 
+    func testOldFileClassificationUsesStrictCutoffAndExcludesDirectoriesAndNilDates() throws {
+        let calendar = makeCalendar()
+        let referenceDate = try XCTUnwrap(
+            calendar.date(from: DateComponents(
+                timeZone: TimeZone(secondsFromGMT: 0),
+                year: 2026,
+                month: 3,
+                day: 26,
+                hour: 12
+            ))
+        )
+        let cutoffDate = try XCTUnwrap(
+            FilterViewModel.DatePreset.older.cutoffDate(relativeTo: referenceDate, calendar: calendar)
+        )
+        let olderDate = try XCTUnwrap(calendar.date(byAdding: .second, value: -1, to: cutoffDate))
+        let newerDate = try XCTUnwrap(calendar.date(byAdding: .day, value: 30, to: cutoffDate))
+
+        let oldFile = makeFile("/root/archive/old.log", size: 50, modificationDate: olderDate)
+        let exactCutoffFile = makeFile("/root/archive/exact.log", size: 40, modificationDate: cutoffDate)
+        let recentFile = makeFile("/root/archive/recent.log", size: 30, modificationDate: newerDate)
+        let missingDateFile = makeFile("/root/archive/missing.log", size: 20, modificationDate: nil)
+        let oldDirectory = makeDirectory(
+            "/root/archive",
+            children: [],
+            modificationDate: olderDate
+        )
+
+        XCTAssertTrue(oldFile.isOldFile(cutoffDate: cutoffDate))
+        XCTAssertFalse(exactCutoffFile.isOldFile(cutoffDate: cutoffDate))
+        XCTAssertFalse(recentFile.isOldFile(cutoffDate: cutoffDate))
+        XCTAssertFalse(missingDateFile.isOldFile(cutoffDate: cutoffDate))
+        XCTAssertFalse(oldDirectory.isOldFile(cutoffDate: cutoffDate))
+    }
+
+    func testOldFileInsightsGroupByDirectoryAndSortDeterministically() throws {
+        let calendar = makeCalendar()
+        let referenceDate = try XCTUnwrap(
+            calendar.date(from: DateComponents(
+                timeZone: TimeZone(secondsFromGMT: 0),
+                year: 2026,
+                month: 3,
+                day: 26,
+                hour: 12
+            ))
+        )
+        let cutoffDate = try XCTUnwrap(
+            FilterViewModel.DatePreset.older.cutoffDate(relativeTo: referenceDate, calendar: calendar)
+        )
+        let oldDate = try XCTUnwrap(calendar.date(byAdding: .day, value: -5, to: cutoffDate))
+        let recentDate = try XCTUnwrap(calendar.date(byAdding: .day, value: 5, to: cutoffDate))
+
+        let alphaLarge = makeFile("/root/alpha/large.bin", size: 400, modificationDate: oldDate)
+        let alphaSmall = makeFile("/root/alpha/small.bin", size: 200, modificationDate: oldDate)
+        let zetaA = makeFile("/root/zeta/a.bin", size: 300, modificationDate: oldDate)
+        let zetaB = makeFile("/root/zeta/b.bin", size: 300, modificationDate: oldDate)
+        let recent = makeFile("/root/recent/new.bin", size: 999, modificationDate: recentDate)
+        let missing = makeFile("/root/missing/unknown.bin", size: 123, modificationDate: nil)
+        let alpha = makeDirectory("/root/alpha", children: [alphaSmall, alphaLarge])
+        let zeta = makeDirectory("/root/zeta", children: [zetaB, zetaA])
+        let root = makeDirectory("/root", children: [missing, zeta, recent, alpha])
+
+        let insights = ScanInsights.make(from: root, referenceDate: referenceDate, calendar: calendar)
+        let oldFiles = try XCTUnwrap(insights.oldFiles)
+
+        XCTAssertEqual(oldFiles.totalCount, 4)
+        XCTAssertEqual(oldFiles.totalSize, 1_200)
+        XCTAssertEqual(
+            oldFiles.directoryGroups.map(\.directoryPath),
+            [
+                "/root/alpha",
+                "/root/zeta",
+            ]
+        )
+        XCTAssertEqual(
+            oldFiles.directoryGroups[0].files.map { $0.path.standardizedFileURL.path },
+            [
+                "/root/alpha/large.bin",
+                "/root/alpha/small.bin",
+            ]
+        )
+        XCTAssertEqual(
+            oldFiles.directoryGroups[1].files.map { $0.path.standardizedFileURL.path },
+            [
+                "/root/zeta/a.bin",
+                "/root/zeta/b.bin",
+            ]
+        )
+    }
+
+    func testOlderDatePresetRejectsFilesExactlyOnTheCutoff() throws {
+        let calendar = makeCalendar()
+        let referenceDate = try XCTUnwrap(
+            calendar.date(from: DateComponents(
+                timeZone: TimeZone(secondsFromGMT: 0),
+                year: 2026,
+                month: 3,
+                day: 26,
+                hour: 12
+            ))
+        )
+        let cutoffDate = try XCTUnwrap(
+            FilterViewModel.DatePreset.older.cutoffDate(relativeTo: referenceDate, calendar: calendar)
+        )
+        let olderDate = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: cutoffDate))
+
+        let filter = FilterViewModel()
+        filter.datePreset = .older
+        filter.maxDate = cutoffDate
+
+        XCTAssertTrue(filter.matches(makeFile("/root/archive/old.log", size: 5, modificationDate: olderDate)))
+        XCTAssertFalse(filter.matches(makeFile("/root/archive/exact.log", size: 5, modificationDate: cutoffDate)))
+    }
+
     @MainActor
     func testInsightSelectionSwitchesToTreemapReturnsToRootAndHighlightsNode() {
         let appState = AppState()
@@ -114,15 +227,34 @@ final class ToolbarMigrationLogicTests: XCTestCase {
         XCTAssertEqual(appState.highlightedNode?.id, selectedNode.id)
     }
 
-    private func makeDirectory(_ path: String, children: [FileNode] = []) -> FileNode {
-        let node = FileNode(url: URL(fileURLWithPath: path), isDirectory: true)
+    private func makeDirectory(
+        _ path: String,
+        children: [FileNode] = [],
+        modificationDate: Date? = nil
+    ) -> FileNode {
+        let node = FileNode(
+            url: URL(fileURLWithPath: path),
+            isDirectory: true,
+            modificationDate: modificationDate
+        )
         node.children = children
         node.size = children.reduce(0) { $0 + $1.size }
         node.fileCount = children.reduce(0) { $0 + $1.fileCount }
         return node
     }
 
-    private func makeFile(_ path: String, size: UInt64) -> FileNode {
-        FileNode(url: URL(fileURLWithPath: path), isDirectory: false, size: size)
+    private func makeFile(_ path: String, size: UInt64, modificationDate: Date? = nil) -> FileNode {
+        FileNode(
+            url: URL(fileURLWithPath: path),
+            isDirectory: false,
+            size: size,
+            modificationDate: modificationDate
+        )
+    }
+
+    private func makeCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
     }
 }

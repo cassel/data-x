@@ -50,9 +50,12 @@ struct InsightsPopover: View {
                 nodes: insights.topDirectories,
                 emptyState: "No child directories available in this scan."
             )
+            if let oldFiles = insights.oldFiles {
+                oldFilesSection(report: oldFiles)
+            }
         }
         .listStyle(.inset(alternatesRowBackgrounds: true))
-        .frame(width: 520, height: 360)
+        .frame(width: 560, height: 420)
     }
 
     @ViewBuilder
@@ -77,6 +80,37 @@ struct InsightsPopover: View {
             }
         } header: {
             Text(title)
+        }
+    }
+
+    @ViewBuilder
+    private func oldFilesSection(report: OldFileInsights) -> some View {
+        Section {
+            if report.hasResults {
+                Text(report.summaryText)
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+            } else {
+                Text(report.emptyStateText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+            }
+
+            ForEach(report.directoryGroups) { group in
+                OldFileDirectoryHeaderRow(group: group)
+
+                ForEach(group.files) { node in
+                    InsightRow(node: node) {
+                        onSelectNode(node)
+                    }
+                    .padding(.leading, 12)
+                }
+            }
+        } header: {
+            Text("Old Files")
         }
     }
 }
@@ -117,5 +151,39 @@ private struct InsightRow: View {
         }
         .buttonStyle(.plain)
         .help(node.path.path)
+    }
+}
+
+private struct OldFileDirectoryHeaderRow: View {
+    let group: OldFileInsights.DirectoryGroup
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: "folder.fill")
+                    .foregroundStyle(FileCategory.folders.color)
+                    .frame(width: 16)
+
+                Text(group.displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 12)
+
+                Text("\(group.fileCountText), \(SizeFormatter.format(group.totalSize))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(group.directoryPath)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.leading, 24)
+        }
+        .padding(.top, 6)
+        .padding(.bottom, 2)
     }
 }

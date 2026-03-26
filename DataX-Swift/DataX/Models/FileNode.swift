@@ -139,6 +139,11 @@ final class FileNode: Identifiable, Hashable {
         }
         children?.forEach { $0.collectFiles(into: &array) }
     }
+
+    func isOldFile(cutoffDate: Date) -> Bool {
+        guard !isDirectory, let modificationDate else { return false }
+        return modificationDate < cutoffDate
+    }
 }
 
 // MARK: - Sendable wrapper for async operations

@@ -5,8 +5,16 @@ import XCTest
 final class ScannerViewModelDeletionTests: XCTestCase {
     func testCommitMoveToTrashRemovesNodeUpdatesAncestorsAndPrunesSearchResults() {
         let viewModel = ScannerViewModel()
-        let target = makeFile("/root/folder/remove.txt", size: 30)
-        let keep = makeFile("/root/folder/keep.txt", size: 70)
+        let target = makeFile(
+            "/root/folder/remove.txt",
+            size: 30,
+            modificationDate: Date(timeIntervalSince1970: 0)
+        )
+        let keep = makeFile(
+            "/root/folder/keep.txt",
+            size: 70,
+            modificationDate: Date()
+        )
         let folder = makeDirectory("/root/folder", children: [target, keep])
         let root = makeDirectory("/root", children: [folder])
 
@@ -16,6 +24,8 @@ final class ScannerViewModelDeletionTests: XCTestCase {
         viewModel.searchQuery = "txt"
         viewModel.searchResults = [target, keep]
         viewModel.refreshInsightRankings()
+
+        XCTAssertEqual(viewModel.insights.oldFiles?.totalCount, 1)
 
         viewModel.commitMoveToTrash(target)
 
@@ -29,6 +39,7 @@ final class ScannerViewModelDeletionTests: XCTestCase {
         XCTAssertEqual(viewModel.searchResults.map(\.id), [keep.id])
         XCTAssertEqual(viewModel.insights.topFiles.map(\.id), [keep.id])
         XCTAssertEqual(viewModel.insights.topDirectories.map(\.id), [folder.id])
+        XCTAssertEqual(viewModel.insights.oldFiles?.totalCount, 0)
         XCTAssertEqual(viewModel.treeMutationRevision, 1)
     }
 
@@ -61,7 +72,12 @@ final class ScannerViewModelDeletionTests: XCTestCase {
         return node
     }
 
-    private func makeFile(_ path: String, size: UInt64) -> FileNode {
-        FileNode(url: URL(fileURLWithPath: path), isDirectory: false, size: size)
+    private func makeFile(_ path: String, size: UInt64, modificationDate: Date? = nil) -> FileNode {
+        FileNode(
+            url: URL(fileURLWithPath: path),
+            isDirectory: false,
+            size: size,
+            modificationDate: modificationDate
+        )
     }
 }

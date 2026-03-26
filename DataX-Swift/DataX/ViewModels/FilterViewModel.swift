@@ -42,22 +42,34 @@ final class FilterViewModel {
 
         var id: String { rawValue }
 
-        var dateRange: (min: Date?, max: Date?) {
-            let now = Date()
-            let calendar = Calendar.current
-
+        func resolvedDateRange(
+            relativeTo referenceDate: Date = Date(),
+            calendar: Calendar = .current
+        ) -> (min: Date?, max: Date?) {
             switch self {
             case .all:
                 return (nil, nil)
             case .lastWeek:
-                return (calendar.date(byAdding: .weekOfYear, value: -1, to: now), nil)
+                return (calendar.date(byAdding: .weekOfYear, value: -1, to: referenceDate), nil)
             case .lastMonth:
-                return (calendar.date(byAdding: .month, value: -1, to: now), nil)
+                return (calendar.date(byAdding: .month, value: -1, to: referenceDate), nil)
             case .lastYear:
-                return (calendar.date(byAdding: .year, value: -1, to: now), nil)
+                return (calendar.date(byAdding: .year, value: -1, to: referenceDate), nil)
             case .older:
-                return (nil, calendar.date(byAdding: .year, value: -1, to: now))
+                return (nil, calendar.date(byAdding: .year, value: -1, to: referenceDate))
             }
+        }
+
+        var dateRange: (min: Date?, max: Date?) {
+            resolvedDateRange()
+        }
+
+        func cutoffDate(
+            relativeTo referenceDate: Date = Date(),
+            calendar: Calendar = .current
+        ) -> Date? {
+            guard self == .older else { return nil }
+            return resolvedDateRange(relativeTo: referenceDate, calendar: calendar).max
         }
     }
 
@@ -70,7 +82,7 @@ final class FilterViewModel {
 
     var datePreset: DatePreset = .all {
         didSet {
-            let range = datePreset.dateRange
+            let range = datePreset.resolvedDateRange()
             minDate = range.min
             maxDate = range.max
         }
@@ -120,8 +132,11 @@ final class FilterViewModel {
             if let minDate, nodeDate < minDate {
                 return false
             }
-            if let maxDate, nodeDate > maxDate {
-                return false
+            if let maxDate {
+                let exceedsMaxDate = datePreset == .older ? nodeDate >= maxDate : nodeDate > maxDate
+                if exceedsMaxDate {
+                    return false
+                }
             }
         }
 

@@ -206,6 +206,7 @@ struct ContentView: View {
                 FileTreePanel(
                     rootNode: rootNode,
                     currentNode: state.scannerViewModel.currentNode,
+                    oldFileCutoffDate: state.scannerViewModel.insights.oldFiles?.cutoffDate,
                     highlightedNode: Binding(
                         get: { state.highlightedNode },
                         set: { state.highlightedNode = $0 }
@@ -574,6 +575,7 @@ private final class SwipeNavigationHostingView<Content: View>: NSHostingView<Con
 struct FileTreePanel: View {
     let rootNode: FileNode
     let currentNode: FileNode?  // Currently navigated node (shown in visualization)
+    let oldFileCutoffDate: Date?
     @Binding var highlightedNode: FileNode?  // Selected in tree (highlighted in treemap)
     let onMoveToTrash: (FileNode) -> Void
     let onNavigate: (FileNode) -> Void  // Double-click to navigate
@@ -624,6 +626,7 @@ struct FileTreePanel: View {
                     node: rootNode,
                     highlightedNode: $highlightedNode,
                     expandedNodes: $expandedNodes,
+                    oldFileCutoffDate: oldFileCutoffDate,
                     searchText: searchText,
                     level: 0,
                     onMoveToTrash: onMoveToTrash,
@@ -688,6 +691,7 @@ struct FileTreeNode: View {
     let node: FileNode
     @Binding var highlightedNode: FileNode?  // Single click highlights
     @Binding var expandedNodes: Set<UUID>
+    let oldFileCutoffDate: Date?
     let searchText: String
     let level: Int
     let onMoveToTrash: (FileNode) -> Void
@@ -699,6 +703,11 @@ struct FileTreeNode: View {
 
     private var isHighlighted: Bool {
         highlightedNode?.id == node.id
+    }
+
+    private var isOldFile: Bool {
+        guard let oldFileCutoffDate else { return false }
+        return node.isOldFile(cutoffDate: oldFileCutoffDate)
     }
 
     private var matchesSearch: Bool {
@@ -741,6 +750,7 @@ struct FileTreeNode: View {
                                 node: child,
                                 highlightedNode: $highlightedNode,
                                 expandedNodes: $expandedNodes,
+                                oldFileCutoffDate: oldFileCutoffDate,
                                 searchText: searchText,
                                 level: level + 1,
                                 onMoveToTrash: onMoveToTrash,
@@ -770,6 +780,17 @@ struct FileTreeNode: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .foregroundColor(matchesSearch || searchText.isEmpty ? .primary : .secondary)
+                .layoutPriority(1)
+
+            if isOldFile {
+                Text("Old")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.14))
+                    .cornerRadius(999)
+            }
 
             Spacer()
 
