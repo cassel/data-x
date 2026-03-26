@@ -41,5 +41,61 @@ final class ContentTransitionPolicyTests: XCTestCase {
         XCTAssertFalse(policy.usesSpatialHero)
         XCTAssertTrue(policy.usesOpacityOnlyPhaseTransitions)
         XCTAssertFalse(policy.usesDirectionalResultsPaneTransition)
+        XCTAssertFalse(policy.usesDirectionalVisualizationNavigationTransition)
+    }
+
+    func testStandardMotionKeepsDirectionalVisualizationNavigationTransitions() {
+        let policy = ContentTransitionMotionPolicy(reduceMotion: false)
+
+        XCTAssertTrue(policy.usesDirectionalVisualizationNavigationTransition)
+    }
+
+    func testSwipeIntentTreatsRightSwipeAsBackWhenHistoryExists() {
+        XCTAssertEqual(
+            SwipeNavigationIntent.resolve(deltaX: -12, deltaY: 1, canNavigateBack: true),
+            .back
+        )
+    }
+
+    func testSwipeIntentIgnoresLeftSwipe() {
+        XCTAssertEqual(
+            SwipeNavigationIntent.resolve(deltaX: 12, deltaY: 1, canNavigateBack: true),
+            .ignore
+        )
+    }
+
+    func testSwipeIntentIgnoresRootLevelSwipeEvenIfDirectionIsBack() {
+        XCTAssertEqual(
+            SwipeNavigationIntent.resolve(deltaX: -12, deltaY: 1, canNavigateBack: false),
+            .ignore
+        )
+    }
+
+    func testSwipeIntentIgnoresVerticalDominantGesture() {
+        XCTAssertEqual(
+            SwipeNavigationIntent.resolve(deltaX: -3, deltaY: 10, canNavigateBack: true),
+            .ignore
+        )
+    }
+
+    func testNavigationDirectionUsesForwardAnimationWhenDepthIncreases() {
+        XCTAssertEqual(
+            VisualizationNavigationDirection.resolve(fromDepth: 2, toDepth: 3),
+            .forward
+        )
+    }
+
+    func testNavigationDirectionUsesBackwardAnimationWhenDepthDecreases() {
+        XCTAssertEqual(
+            VisualizationNavigationDirection.resolve(fromDepth: 3, toDepth: 2),
+            .backward
+        )
+    }
+
+    func testNavigationDirectionUsesNeutralAnimationWhenDepthIsUnchanged() {
+        XCTAssertEqual(
+            VisualizationNavigationDirection.resolve(fromDepth: 2, toDepth: 2),
+            .neutral
+        )
     }
 }

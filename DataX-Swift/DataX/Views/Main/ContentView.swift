@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum ContentViewPhase: Equatable {
@@ -38,6 +39,53 @@ enum ContentViewPhase: Equatable {
     }
 }
 
+enum SwipeNavigationIntent: Equatable {
+    case back
+    case ignore
+
+    static func resolve(deltaX: CGFloat, deltaY: CGFloat, canNavigateBack: Bool) -> Self {
+        guard canNavigateBack else { return .ignore }
+        guard abs(deltaX) > abs(deltaY), deltaX != 0 else { return .ignore }
+
+        return deltaX < 0 ? .back : .ignore
+    }
+}
+
+enum VisualizationNavigationDirection: Equatable {
+    case neutral
+    case forward
+    case backward
+
+    static func resolve(fromDepth: Int, toDepth: Int) -> Self {
+        if toDepth > fromDepth {
+            return .forward
+        }
+
+        if toDepth < fromDepth {
+            return .backward
+        }
+
+        return .neutral
+    }
+
+    var transition: AnyTransition {
+        switch self {
+        case .neutral:
+            return .opacity
+        case .forward:
+            return .asymmetric(
+                insertion: .move(edge: .trailing).combined(with: .opacity),
+                removal: .move(edge: .leading).combined(with: .opacity)
+            )
+        case .backward:
+            return .asymmetric(
+                insertion: .move(edge: .leading).combined(with: .opacity),
+                removal: .move(edge: .trailing).combined(with: .opacity)
+            )
+        }
+    }
+}
+
 struct ContentTransitionMotionPolicy {
     let reduceMotion: Bool
 
@@ -53,12 +101,24 @@ struct ContentTransitionMotionPolicy {
         !reduceMotion
     }
 
+    var usesDirectionalVisualizationNavigationTransition: Bool {
+        !reduceMotion
+    }
+
     var phaseAnimation: Animation {
         if usesOpacityOnlyPhaseTransitions {
             return .easeInOut(duration: 0.2)
         }
 
         return .spring(duration: 0.4)
+    }
+
+    var navigationAnimation: Animation {
+        if reduceMotion {
+            return .easeInOut(duration: 0.15)
+        }
+
+        return .easeInOut(duration: 0.24)
     }
 
     var handoffTransition: AnyTransition {
@@ -72,6 +132,16 @@ struct ContentTransitionMotionPolicy {
 
         return .opacity
     }
+
+    func visualizationNavigationTransition(
+        for direction: VisualizationNavigationDirection
+    ) -> AnyTransition {
+        if usesDirectionalVisualizationNavigationTransition {
+            return direction.transition
+        }
+
+        return .opacity
+    }
 }
 
 struct ContentView: View {
@@ -79,6 +149,7 @@ struct ContentView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var transitionNamespace
     @State private var isLegendVisible = false
+    @State private var visualizationNavigationDirection: VisualizationNavigationDirection = .neutral
 
     var body: some View {
         @Bindable var state = appState
@@ -134,8 +205,7 @@ struct ContentView: View {
                         set: { state.highlightedNode = $0 }
                     ),
                     onNavigate: { node in
-                        state.scannerViewModel.navigateTo(node)
-                        state.highlightedNode = nil  // Clear highlight when navigating
+                        navigate(to: node, clearHighlight: true)
                     }
                 )
                 .transition(motionPolicy.handoffTransition)
@@ -205,14 +275,8 @@ struct ContentView: View {
 
                 Divider()
 
-                mainVisualization(node: node)
+                visualizationShell(node: node, motionPolicy: motionPolicy)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(alignment: .topTrailing) {
-                        if isLegendVisible {
-                            FileTypeLegendOverlay(node: node)
-                                .padding(12)
-                        }
-                    }
 
                 Divider()
 
@@ -296,21 +360,158 @@ struct ContentView: View {
     }
 
     @ViewBuilder
+    private func visualizationShell(
+        node: FileNode,
+        motionPolicy: ContentTransitionMotionPolicy
+    ) -> some View {
+        SwipeNavigationSurface(
+            canNavigateBack: appState.scannerViewModel.canNavigateBack,
+            onSwipeBack: handleSwipeBack
+        ) {
+            ZStack {
+                mainVisualization(node: node)
+                    .id(node.id)
+                    .transition(
+                        motionPolicy.visualizationNavigationTransition(
+                            for: visualizationNavigationDirection
+                        )
+                    )
+            }
+            .clipped()
+            .animation(motionPolicy.navigationAnimation, value: node.id)
+            .overlay(alignment: .topTrailing) {
+                if isLegendVisible {
+                    FileTypeLegendOverlay(node: node)
+                        .padding(12)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private func mainVisualization(node: FileNode) -> some View {
         switch appState.selectedVisualization {
         case .treemap:
-            TreemapView(node: node, highlightedNode: appState.highlightedNode) { appState.scannerViewModel.navigateTo($0) }
+            TreemapView(node: node, highlightedNode: appState.highlightedNode) { navigate(to: $0) }
         case .sunburst:
-            SunburstView(node: node) { appState.scannerViewModel.navigateTo($0) }
+            SunburstView(node: node) { navigate(to: $0) }
         case .icicle:
-            IcicleView(node: node) { appState.scannerViewModel.navigateTo($0) }
+            IcicleView(node: node) { navigate(to: $0) }
         case .barChart:
-            BarChartView(node: node) { appState.scannerViewModel.navigateTo($0) }
+            BarChartView(node: node) { navigate(to: $0) }
         case .circlePacking:
-            CirclePackingView(node: node) { appState.scannerViewModel.navigateTo($0) }
+            CirclePackingView(node: node) { navigate(to: $0) }
         case .fileTree:
-            TreemapView(node: node, highlightedNode: appState.highlightedNode) { appState.scannerViewModel.navigateTo($0) }
+            TreemapView(node: node, highlightedNode: appState.highlightedNode) { navigate(to: $0) }
         }
+    }
+
+    private func navigate(to node: FileNode, clearHighlight: Bool = false) {
+        guard node.isDirectory else { return }
+
+        let currentDepth = appState.scannerViewModel.navigationStack.count
+        let targetDepth = targetNavigationDepth(for: node, from: appState.scannerViewModel.navigationStack)
+        visualizationNavigationDirection = VisualizationNavigationDirection.resolve(
+            fromDepth: currentDepth,
+            toDepth: targetDepth
+        )
+
+        withAnimation(ContentTransitionMotionPolicy(reduceMotion: reduceMotion).navigationAnimation) {
+            appState.scannerViewModel.navigateTo(node)
+
+            if clearHighlight {
+                appState.highlightedNode = nil
+            }
+        }
+    }
+
+    private func handleSwipeBack() {
+        guard appState.scannerViewModel.canNavigateBack else { return }
+
+        visualizationNavigationDirection = .backward
+
+        withAnimation(ContentTransitionMotionPolicy(reduceMotion: reduceMotion).navigationAnimation) {
+            appState.scannerViewModel.navigateBack()
+        }
+    }
+
+    private func targetNavigationDepth(for node: FileNode, from navigationStack: [FileNode]) -> Int {
+        if let index = navigationStack.firstIndex(where: { $0.id == node.id }) {
+            return index + 1
+        }
+
+        return navigationStack.count + 1
+    }
+}
+
+private struct SwipeNavigationSurface<Content: View>: NSViewRepresentable {
+    let canNavigateBack: Bool
+    let onSwipeBack: () -> Void
+    let content: Content
+
+    init(
+        canNavigateBack: Bool,
+        onSwipeBack: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.canNavigateBack = canNavigateBack
+        self.onSwipeBack = onSwipeBack
+        self.content = content()
+    }
+
+    func makeNSView(context: Context) -> SwipeNavigationHostingView<Content> {
+        let view = SwipeNavigationHostingView(rootView: content)
+        view.canNavigateBack = canNavigateBack
+        view.onSwipeBack = onSwipeBack
+        return view
+    }
+
+    func updateNSView(_ nsView: SwipeNavigationHostingView<Content>, context: Context) {
+        nsView.rootView = content
+        nsView.canNavigateBack = canNavigateBack
+        nsView.onSwipeBack = onSwipeBack
+    }
+}
+
+private final class SwipeNavigationHostingView<Content: View>: NSHostingView<Content> {
+    var canNavigateBack = false
+    var onSwipeBack: (() -> Void)?
+    private var handledSwipeInCurrentSequence = false
+
+    required init(rootView: Content) {
+        super.init(rootView: rootView)
+    }
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override func swipe(with event: NSEvent) {
+        let isDiscreteEvent = event.phase.isEmpty || event.phase.contains(.ended) || event.phase.contains(.cancelled)
+
+        if event.phase.contains(.began) {
+            handledSwipeInCurrentSequence = false
+        }
+
+        let intent = SwipeNavigationIntent.resolve(
+            deltaX: event.deltaX,
+            deltaY: event.deltaY,
+            canNavigateBack: canNavigateBack
+        )
+
+        if intent == .back, !handledSwipeInCurrentSequence {
+            handledSwipeInCurrentSequence = !isDiscreteEvent
+            onSwipeBack?()
+        }
+
+        if isDiscreteEvent {
+            handledSwipeInCurrentSequence = false
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 }
 
