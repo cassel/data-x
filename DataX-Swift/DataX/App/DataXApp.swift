@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 @main
 struct DataXApp: App {
@@ -10,6 +11,7 @@ struct DataXApp: App {
                 .environment(appState)
                 .frame(minWidth: 900, minHeight: 600)
         }
+        .modelContainer(for: ScanRecord.self)
         .windowStyle(.automatic)
         .windowToolbarStyle(.unified(showsTitle: true))
         .commands {

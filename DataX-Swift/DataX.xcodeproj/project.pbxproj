@@ -43,6 +43,7 @@
 		D395AD06C04852E1C87F33F3 /* DataXApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A2CB155009709DEEB590EC /* DataXApp.swift */; };
 		D852725830D6D693143E0216 /* DiskInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46F587C76B467E3E39FB989 /* DiskInfo.swift */; };
 		E99459F832CF805C7E668C4F /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B9325570E8663957C34F53 /* AppState.swift */; };
+		F64A1C3E6B904DBFA12C7831 /* ScanRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = F64A1C3E6B904DBFA12C7832 /* ScanRecord.swift */; };
 		F1A9C73317D44A6EA1C4C8A1 /* TreemapLayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4B7A21E2D4C489C8C1327F1 /* TreemapLayerView.swift */; };
 /* End PBXBuildFile section */
 
@@ -87,6 +88,7 @@
 		EC70483222164363921D74FD /* SizeFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SizeFormatter.swift; sourceTree = "<group>"; };
 		E4B7A21E2D4C489C8C1327F1 /* TreemapLayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreemapLayerView.swift; sourceTree = "<group>"; };
 		FA83C573D3FA33EA8E13213D /* HeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeaderView.swift; sourceTree = "<group>"; };
+		F64A1C3E6B904DBFA12C7832 /* ScanRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanRecord.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -144,6 +146,7 @@
 				3D1C9374C17D1CECE12A62D8 /* FileNode.swift */,
 				74B1E6C3D94A4F6F8E2C1B7A /* ScanEvent.swift */,
 				2C25ABF65EFC9AAE076DA6BD /* ScanProgress.swift */,
+				F64A1C3E6B904DBFA12C7832 /* ScanRecord.swift */,
 				51F9F4AEEB598CA74D43B5EA /* SSHConnection.swift */,
 			);
 			path = Models;
@@ -384,6 +387,7 @@
 				B79C43F4CDB36E562C44C555 /* SSHViewModel.swift in Sources */,
 				8E3C7A9B1F244C6AA2D7E1F5 /* ScanEvent.swift in Sources */,
 				82D821DEB9FD0C7EF97D9436 /* ScanProgress.swift in Sources */,
+				F64A1C3E6B904DBFA12C7831 /* ScanRecord.swift in Sources */,
 				C8F4CFB96A7CA8AE7D9148A4 /* ScannerService.swift in Sources */,
 				7C7728A6162A9CD1599B5ED0 /* ScannerViewModel.swift in Sources */,
 				B9644BF58EAD4C8E702E9811 /* SizeFormatter.swift in Sources */,
