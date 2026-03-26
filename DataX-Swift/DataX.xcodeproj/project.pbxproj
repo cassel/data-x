@@ -27,6 +27,7 @@
 		6F5BE60B9B2AF9345CE7DF28 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2358E304F6FAC80B8CB40B30 /* StatusBarView.swift */; };
 		7C7728A6162A9CD1599B5ED0 /* ScannerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C25BFA1C0F554AC4F760ACA0 /* ScannerViewModel.swift */; };
 		82D821DEB9FD0C7EF97D9436 /* ScanProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C25ABF65EFC9AAE076DA6BD /* ScanProgress.swift */; };
+		8E3C7A9B1F244C6AA2D7E1F5 /* ScanEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74B1E6C3D94A4F6F8E2C1B7A /* ScanEvent.swift */; };
 		9762A6933EEC94ECCD5D688C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E1CE0587AA6C4BFC28A455 /* ContentView.swift */; };
 		9DEAA80264B7F320DA27530C /* SSHConnectionModal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4C91991DAB418A6E1227B37 /* SSHConnectionModal.swift */; };
 		A7E959C1CF10F7F7838BF920 /* FileCategory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FF7262ECBECD09DD652AA8 /* FileCategory.swift */; };
@@ -55,6 +56,7 @@
 		24355B02DF6D93F7FE8E5D93 /* CirclePackingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CirclePackingView.swift; sourceTree = "<group>"; };
 		25F6DD044EA4929736EF68F9 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		2C25ABF65EFC9AAE076DA6BD /* ScanProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanProgress.swift; sourceTree = "<group>"; };
+		74B1E6C3D94A4F6F8E2C1B7A /* ScanEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanEvent.swift; sourceTree = "<group>"; };
 		2F3A4B5C6D7E8F901A2B3C4D /* FileTypeLegendOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTypeLegendOverlay.swift; sourceTree = "<group>"; };
 		36747BF62C4E860F714CF69F /* SSHSidebarSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHSidebarSection.swift; sourceTree = "<group>"; };
 		3F4A5B6C7D8E9F001A2B3C4D /* SSHToolbarPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHToolbarPopover.swift; sourceTree = "<group>"; };
@@ -135,6 +137,7 @@
 				B46F587C76B467E3E39FB989 /* DiskInfo.swift */,
 				B9FF7262ECBECD09DD652AA8 /* FileCategory.swift */,
 				3D1C9374C17D1CECE12A62D8 /* FileNode.swift */,
+				74B1E6C3D94A4F6F8E2C1B7A /* ScanEvent.swift */,
 				2C25ABF65EFC9AAE076DA6BD /* ScanProgress.swift */,
 				51F9F4AEEB598CA74D43B5EA /* SSHConnection.swift */,
 			);
@@ -373,6 +376,7 @@
 				B827BB58CCF0A3722A9B5C13 /* SSHSidebarSection.swift in Sources */,
 				1F2A3B4C5D6E7F8091A2B3C4 /* SSHToolbarPopover.swift in Sources */,
 				B79C43F4CDB36E562C44C555 /* SSHViewModel.swift in Sources */,
+				8E3C7A9B1F244C6AA2D7E1F5 /* ScanEvent.swift in Sources */,
 				82D821DEB9FD0C7EF97D9436 /* ScanProgress.swift in Sources */,
 				C8F4CFB96A7CA8AE7D9148A4 /* ScannerService.swift in Sources */,
 				7C7728A6162A9CD1599B5ED0 /* ScannerViewModel.swift in Sources */,

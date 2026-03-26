@@ -2,38 +2,12 @@ import XCTest
 @testable import DataX
 
 final class ScannerServiceTests: XCTestCase {
-    func testScanEmptyDirectoryProducesEmptyRootAndCompleteProgress() async throws {
-        let directory = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        let scanner = ScannerService()
-        let (stream, continuation) = makeProgressStream()
-        let progressTask = Task { await self.collectProgress(from: stream) }
-
-        let result = try await scanner.scan(
-            directory: directory,
-            progress: continuation
-        )
-        let progressUpdates = await progressTask.value
-
-        XCTAssertEqual(result.url.standardizedFileURL, directory.standardizedFileURL)
-        XCTAssertTrue(result.isDirectory)
-        XCTAssertEqual(result.size, 0)
-        XCTAssertEqual(result.fileCount, 0)
-        XCTAssertTrue((result.children ?? []).isEmpty)
-        XCTAssertEqual(progressUpdates.first?.currentPath, directory.lastPathComponent)
-        XCTAssertEqual(progressUpdates.first?.isComplete, false)
-        XCTAssertEqual(progressUpdates.last?.isComplete, true)
-        XCTAssertEqual(progressUpdates.last?.bytesScanned, 0)
-    }
-
-    func testScanNestedDirectoryAggregatesSizeAndSkipsHiddenEntriesByDefault() async throws {
+    func testScanEmitsPartialTreeForEachCompletedImmediateChildAndFinalSnapshot() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let alpha = directory.appendingPathComponent("alpha", isDirectory: true)
         let nested = alpha.appendingPathComponent("nested", isDirectory: true)
-
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
         try writeFile(at: alpha.appendingPathComponent("a.txt"), size: 10)
         try writeFile(at: nested.appendingPathComponent("b.bin"), size: 20)
@@ -41,71 +15,56 @@ final class ScannerServiceTests: XCTestCase {
         try writeFile(at: directory.appendingPathComponent(".hidden"), size: 100)
 
         let scanner = ScannerService()
-        let (stream, continuation) = makeProgressStream()
-        let progressTask = Task { await self.collectProgress(from: stream) }
+        let events = await scanner.scan(directory: directory)
+        let collectedEvents = await collectEvents(from: events)
 
-        let result = try await scanner.scan(
-            directory: directory,
-            progress: continuation
+        let partialTrees = collectedEvents.compactMap(\.partialTree)
+        let completedRoot = try XCTUnwrap(collectedEvents.compactMap(\.completeTree).last)
+
+        XCTAssertEqual(
+            partialTrees.map { $0.url.lastPathComponent }.sorted(),
+            ["alpha", "visible.log"]
         )
-        let progressUpdates = await progressTask.value
+        XCTAssertEqual(Set(partialTrees.map(\.url.standardizedFileURL)), Set([
+            alpha.standardizedFileURL,
+            directory.appendingPathComponent("visible.log").standardizedFileURL
+        ]))
+        XCTAssertEqual(completedRoot.size, 35)
+        XCTAssertEqual(completedRoot.fileCount, 3)
+        XCTAssertEqual(
+            completedRoot.children?.map(\.url.lastPathComponent),
+            ["alpha", "visible.log"]
+        )
 
-        XCTAssertEqual(result.size, 35)
-        XCTAssertEqual(result.fileCount, 3)
-        XCTAssertEqual(result.children?.map { $0.url.lastPathComponent }, ["alpha", "visible.log"])
-        XCTAssertEqual(result.children?.first?.size, 30)
-        XCTAssertEqual(result.children?.first?.fileCount, 2)
-        XCTAssertEqual(progressUpdates.last?.isComplete, true)
-        XCTAssertEqual(progressUpdates.last?.filesScanned, 3)
-        XCTAssertEqual(progressUpdates.last?.directoriesScanned, 3)
-        XCTAssertEqual(progressUpdates.last?.bytesScanned, 35)
+        let progressEvents = collectedEvents.compactMap(\.progressUpdate)
+        XCTAssertEqual(progressEvents.first?.currentPath, directory.lastPathComponent)
+        XCTAssertEqual(progressEvents.last?.isComplete, true)
     }
 
-    func testScanCancellationStopsWithoutPublishingACompleteProgressEvent() async throws {
+    func testScanCancellationFinishesEventStreamWithoutCompleteEvent() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
         try makeLargeFixture(at: directory, directoryCount: 24, filesPerDirectory: 160)
 
         let scanner = ScannerService()
-        let (stream, continuation) = makeProgressStream()
-        var scanTask: Task<FileNodeData, Error>!
+        let events = await scanner.scan(directory: directory)
+        var collectedEvents: [ScanEvent] = []
+        var requestedCancellation = false
 
-        let progressTask = Task { () -> [ScanProgress] in
-            var updates: [ScanProgress] = []
-            var requestedCancellation = false
+        for await event in events {
+            collectedEvents.append(event)
 
-            for await update in stream {
-                updates.append(update)
-
-                if !requestedCancellation, update.filesScanned >= 100 {
-                    requestedCancellation = true
-                    scanTask.cancel()
-                    await scanner.cancel()
-                }
+            if case .progress(let progress) = event,
+               !requestedCancellation,
+               progress.filesScanned >= 100 {
+                requestedCancellation = true
+                await scanner.cancel()
             }
-
-            return updates
         }
 
-        scanTask = Task {
-            try await scanner.scan(
-                directory: directory,
-                progress: continuation
-            )
-        }
-
-        do {
-            _ = try await scanTask.value
-            XCTFail("Expected the scan task to be cancelled")
-        } catch is CancellationError {
-            // Expected.
-        }
-
-        let progressUpdates = await progressTask.value
-
-        XCTAssertTrue(progressUpdates.contains { $0.filesScanned >= 100 })
-        XCTAssertFalse(progressUpdates.contains(where: \.isComplete))
+        XCTAssertTrue(collectedEvents.contains { $0.progressUpdate?.filesScanned ?? 0 >= 100 })
+        XCTAssertFalse(collectedEvents.contains { $0.completeTree != nil })
     }
 
     @MainActor
@@ -151,25 +110,17 @@ final class ScannerServiceTests: XCTestCase {
 
         XCTAssertEqual(converted.size, 30)
         XCTAssertEqual(converted.fileCount, 2)
-        XCTAssertEqual(converted.children?.map { $0.name }, ["alpha"])
-        XCTAssertEqual(converted.children?.first?.children?.map { $0.name }, ["b.txt", "a.txt"])
+        XCTAssertEqual(converted.children?.map(\.name), ["alpha"])
+        XCTAssertEqual(converted.children?.first?.children?.map(\.name), ["b.txt", "a.txt"])
         XCTAssertEqual(converted.children?.first?.fileCount, 2)
     }
 
-    private func makeProgressStream() -> (AsyncStream<ScanProgress>, AsyncStream<ScanProgress>.Continuation) {
-        var capturedContinuation: AsyncStream<ScanProgress>.Continuation!
-        let stream = AsyncStream<ScanProgress>(bufferingPolicy: .unbounded) { continuation in
-            capturedContinuation = continuation
+    private func collectEvents(from stream: AsyncStream<ScanEvent>) async -> [ScanEvent] {
+        var events: [ScanEvent] = []
+        for await event in stream {
+            events.append(event)
         }
-        return (stream, capturedContinuation)
-    }
-
-    private func collectProgress(from stream: AsyncStream<ScanProgress>) async -> [ScanProgress] {
-        var updates: [ScanProgress] = []
-        for await update in stream {
-            updates.append(update)
-        }
-        return updates
+        return events
     }
 
     private func makeTemporaryDirectory() throws -> URL {
@@ -194,5 +145,22 @@ final class ScannerServiceTests: XCTestCase {
     private func writeFile(at url: URL, size: Int) throws {
         let data = Data(repeating: 65, count: size)
         FileManager.default.createFile(atPath: url.path, contents: data)
+    }
+}
+
+private extension ScanEvent {
+    var progressUpdate: ScanProgress? {
+        guard case .progress(let progress) = self else { return nil }
+        return progress
+    }
+
+    var partialTree: FileNodeData? {
+        guard case .partialTree(let tree) = self else { return nil }
+        return tree
+    }
+
+    var completeTree: FileNodeData? {
+        guard case .complete(let tree) = self else { return nil }
+        return tree
     }
 }

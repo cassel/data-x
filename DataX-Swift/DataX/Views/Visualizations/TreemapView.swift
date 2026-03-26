@@ -6,6 +6,7 @@ struct TreemapView: View {
     let highlightedNode: FileNode?  // From file tree selection
     let onSelect: (FileNode) -> Void
     let layoutRevision: Int
+    let incrementalScanInProgress: Bool
     let onMoveToTrash: (FileNode) -> Bool
     let onCommitMoveToTrash: (FileNode) -> Void
 
@@ -16,6 +17,8 @@ struct TreemapView: View {
     @State private var lastUpdateTime: Date = .distantPast
     @State private var pulseExpanded = false
     @State private var deletionAnimation: TreemapDeletionAnimation?
+    @State private var layoutAnimation: TreemapLayoutAnimation?
+    @State private var lastViewSize: CGSize = .zero
     @State private var zoomState = VisualizationZoomState()
     @GestureState private var zoomGesture = VisualizationZoomGestureState()
 
@@ -32,7 +35,8 @@ struct TreemapView: View {
         let candidate = hoveredNode ?? highlightedNode
 
         guard let candidate,
-              !isAnimatingRemoval(for: candidate) else {
+              !isAnimatingRemoval(for: candidate),
+              activeRects().contains(where: { $0.id == candidate.id }) else {
             return nil
         }
 
@@ -40,7 +44,7 @@ struct TreemapView: View {
     }
 
     private var pulseTargetRect: TreemapRect? {
-        guard deletionAnimation == nil else { return nil }
+        guard deletionAnimation == nil, layoutAnimation == nil else { return nil }
         return TreemapPulsePolicy.largestVisibleTopLevelRect(in: cachedRects)
     }
 
@@ -49,7 +53,7 @@ struct TreemapView: View {
             reduceMotion: accessibilityReduceMotion,
             hasHover: hoveredNode != nil,
             hasHighlight: highlightedNode != nil
-        ) && deletionAnimation == nil
+        ) && deletionAnimation == nil && layoutAnimation == nil
     }
 
     private var currentPulseScale: CGFloat {
@@ -129,6 +133,7 @@ struct TreemapView: View {
             .onChange(of: node.id) { _, _ in
                 resetZoom(animated: false)
                 deletionAnimation = nil
+                layoutAnimation = nil
                 hoveredNode = nil
                 lastMouseLocation = nil
                 lastUpdateTime = .distantPast
@@ -203,8 +208,25 @@ struct TreemapView: View {
     private func buildCache(size: CGSize) {
         guard deletionAnimation == nil else { return }
         guard size.width > 0 && size.height > 0 else { return }
+        lastViewSize = size
 
-        cachedRects = layoutRects(for: node, size: size)
+        let newRects = layoutRects(for: node, size: size)
+        let sourceRects = activeRects()
+
+        guard !hasSameLayout(sourceRects, newRects) else {
+            cachedRects = newRects
+            layoutAnimation = nil
+            return
+        }
+
+        cachedRects = newRects
+
+        if sourceRects.isEmpty && newRects.isEmpty {
+            layoutAnimation = nil
+            return
+        }
+
+        startLayoutAnimation(from: sourceRects, to: newRects)
     }
 
     private func layoutRects(for node: FileNode, size: CGSize) -> [TreemapRect] {
@@ -221,7 +243,7 @@ struct TreemapView: View {
 
     private func findHoveredNode(at point: CGPoint) -> FileNode? {
         var deepest: TreemapRect?
-        for rect in cachedRects {
+        for rect in activeRects() {
             if rect.contains(point) {
                 if deepest == nil || rect.depth > deepest!.depth {
                     deepest = rect
@@ -235,7 +257,7 @@ struct TreemapView: View {
 
     @ViewBuilder
     private func mainTreemapLayer() -> some View {
-        if deletionAnimation != nil {
+        if deletionAnimation != nil || layoutAnimation != nil {
             TimelineView(.animation) { timeline in
                 Canvas { context, size in
                     drawTreemapStatic(context: &context, size: size, at: timeline.date)
@@ -252,7 +274,7 @@ struct TreemapView: View {
 
     @ViewBuilder
     private func hoverOverlayLayer() -> some View {
-        if deletionAnimation != nil {
+        if deletionAnimation != nil || layoutAnimation != nil {
             TimelineView(.animation) { timeline in
                 Canvas { context, size in
                     drawHoverOverlay(context: context, size: size, at: timeline.date)
@@ -270,6 +292,20 @@ struct TreemapView: View {
 
         if let deletionAnimation {
             for renderedRect in renderedRects(for: deletionAnimation, at: date ?? .now) {
+                drawStaticRect(
+                    renderedRect.rect,
+                    pulseScale: 1,
+                    opacity: renderedRect.opacity,
+                    context: &context
+                )
+            }
+            return
+        }
+
+        if let layoutAnimation {
+            let activeDate = date ?? .now
+
+            for renderedRect in renderedRects(for: layoutAnimation, at: activeDate) {
                 drawStaticRect(
                     renderedRect.rect,
                     pulseScale: 1,
@@ -369,8 +405,15 @@ struct TreemapView: View {
     }
 
     private func activeRects(at date: Date? = nil) -> [TreemapRect] {
-        guard let deletionAnimation else { return cachedRects }
-        return renderedRects(for: deletionAnimation, at: date ?? .now).map(\.rect)
+        if let deletionAnimation {
+            return renderedRects(for: deletionAnimation, at: date ?? .now).map(\.rect)
+        }
+
+        if let layoutAnimation {
+            return renderedRects(for: layoutAnimation, at: date ?? .now).map(\.rect)
+        }
+
+        return cachedRects
     }
 
     private func renderedRects(for animation: TreemapDeletionAnimation, at date: Date) -> [RenderedTreemapRect] {
@@ -419,6 +462,46 @@ struct TreemapView: View {
                         progress: survivingProgress
                     ),
                     opacity: animation.motion.appearingRectOpacity(for: date.timeIntervalSince(animation.startedAt))
+                )
+            )
+        }
+
+        return renderedRects
+    }
+
+    private func renderedRects(for animation: TreemapLayoutAnimation, at date: Date) -> [RenderedTreemapRect] {
+        let progress = animation.motion.progress(at: date.timeIntervalSince(animation.startedAt))
+        let appearingOpacity = animation.motion.appearingRectOpacity(at: date.timeIntervalSince(animation.startedAt))
+        var renderedRects: [RenderedTreemapRect] = []
+        renderedRects.reserveCapacity(max(animation.sourceRects.count, animation.destinationRects.count))
+
+        for sourceRect in animation.sourceRects {
+            if let destinationRect = animation.destinationRectsByID[sourceRect.id] {
+                renderedRects.append(
+                    RenderedTreemapRect(
+                        rect: interpolate(from: sourceRect, to: destinationRect, progress: progress),
+                        opacity: 1
+                    )
+                )
+            } else {
+                renderedRects.append(
+                    RenderedTreemapRect(
+                        rect: collapse(rect: sourceRect, toward: sourceRect.center, progress: progress),
+                        opacity: 1 - progress
+                    )
+                )
+            }
+        }
+
+        for destinationRect in animation.destinationRects where !animation.sourceRectIDs.contains(destinationRect.id) {
+            renderedRects.append(
+                RenderedTreemapRect(
+                    rect: interpolate(
+                        from: collapsedRect(for: destinationRect, around: destinationRect.center),
+                        to: destinationRect,
+                        progress: progress
+                    ),
+                    opacity: appearingOpacity
                 )
             )
         }
@@ -476,6 +559,45 @@ struct TreemapView: View {
         )
     }
 
+    private func startLayoutAnimation(from sourceRects: [TreemapRect], to destinationRects: [TreemapRect]) {
+        guard !sourceRects.isEmpty || !destinationRects.isEmpty else {
+            layoutAnimation = nil
+            return
+        }
+
+        let animation = TreemapLayoutAnimation(
+            sourceRects: sourceRects,
+            destinationRects: destinationRects,
+            startedAt: .now,
+            reduceMotion: accessibilityReduceMotion
+        )
+
+        layoutAnimation = animation
+        scheduleLayoutAnimationCompletion(for: animation)
+    }
+
+    private func scheduleLayoutAnimationCompletion(for animation: TreemapLayoutAnimation) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + animation.motion.duration) {
+            guard layoutAnimation?.token == animation.token else { return }
+
+            cachedRects = animation.destinationRects
+            layoutAnimation = nil
+            refreshHoveredNode(in: lastViewSize)
+        }
+    }
+
+    private func hasSameLayout(_ lhs: [TreemapRect], _ rhs: [TreemapRect]) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+
+        return zip(lhs, rhs).allSatisfy { left, right in
+            left.id == right.id &&
+            abs(left.x - right.x) < 0.001 &&
+            abs(left.y - right.y) < 0.001 &&
+            abs(left.width - right.width) < 0.001 &&
+            abs(left.height - right.height) < 0.001
+        }
+    }
+
     private func applyZoomTransform(to context: inout GraphicsContext, size: CGSize) {
         let scale = effectiveZoomScale
         guard abs(scale - 1) > 0.0001 else { return }
@@ -510,7 +632,7 @@ struct TreemapView: View {
     }
 
     private func handlePrimaryTap() {
-        guard deletionAnimation == nil else { return }
+        guard deletionAnimation == nil, !incrementalScanInProgress else { return }
 
         if let hoveredNode, hoveredNode.isDirectory {
             onSelect(hoveredNode)
@@ -563,6 +685,10 @@ struct TreemapView: View {
     private func contextMenuItems(viewSize: CGSize) -> some View {
         if deletionAnimation != nil {
             Label("Deletion In Progress", systemImage: "hourglass")
+        } else if incrementalScanInProgress {
+            Label("Scan In Progress", systemImage: "hourglass")
+
+            Text("Navigation and file actions unlock after completion")
         } else if let hoveredNode {
             Button(role: .destructive) {
                 beginAnimatedTrash(for: hoveredNode, in: viewSize)
@@ -580,6 +706,7 @@ struct TreemapView: View {
     }
 
     private func beginAnimatedTrash(for target: FileNode, in viewSize: CGSize) {
+        guard !incrementalScanInProgress else { return }
         guard deletionAnimation == nil else { return }
         guard onMoveToTrash(target) else { return }
 
@@ -710,6 +837,30 @@ private struct TreemapDeletionAnimation {
     }
 }
 
+private struct TreemapLayoutAnimation {
+    let token = UUID()
+    let sourceRects: [TreemapRect]
+    let sourceRectIDs: Set<UUID>
+    let destinationRects: [TreemapRect]
+    let destinationRectsByID: [UUID: TreemapRect]
+    let startedAt: Date
+    let motion: TreemapLayoutMotionPolicy
+
+    init(
+        sourceRects: [TreemapRect],
+        destinationRects: [TreemapRect],
+        startedAt: Date,
+        reduceMotion: Bool
+    ) {
+        self.sourceRects = sourceRects
+        self.sourceRectIDs = Set(sourceRects.map(\.id))
+        self.destinationRects = destinationRects
+        self.destinationRectsByID = Dictionary(uniqueKeysWithValues: destinationRects.map { ($0.id, $0) })
+        self.startedAt = startedAt
+        self.motion = TreemapLayoutMotionPolicy(reduceMotion: reduceMotion)
+    }
+}
+
 private struct TreemapDeletionMotionPolicy {
     let reduceMotion: Bool
 
@@ -751,6 +902,41 @@ private struct TreemapDeletionMotionPolicy {
 
     private func easeOut(_ t: Double) -> Double {
         1 - pow(1 - t, 3)
+    }
+}
+
+private struct TreemapLayoutMotionPolicy {
+    let reduceMotion: Bool
+
+    var duration: TimeInterval {
+        reduceMotion ? 0.12 : 0.24
+    }
+
+    func progress(at elapsed: TimeInterval) -> Double {
+        let t = normalized(elapsed, over: duration)
+
+        if reduceMotion {
+            return easeOut(t)
+        }
+
+        return easeInOut(t)
+    }
+
+    func appearingRectOpacity(at elapsed: TimeInterval) -> Double {
+        min(1, progress(at: elapsed))
+    }
+
+    private func normalized(_ elapsed: TimeInterval, over duration: TimeInterval) -> Double {
+        guard duration > 0 else { return 1 }
+        return min(max(elapsed / duration, 0), 1)
+    }
+
+    private func easeOut(_ t: Double) -> Double {
+        1 - pow(1 - t, 3)
+    }
+
+    private func easeInOut(_ t: Double) -> Double {
+        t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2
     }
 }
 
@@ -964,6 +1150,7 @@ struct MouseTracker: NSViewRepresentable {
         highlightedNode: nil,
         onSelect: { _ in },
         layoutRevision: 0,
+        incrementalScanInProgress: false,
         onMoveToTrash: { _ in true },
         onCommitMoveToTrash: { _ in }
     )

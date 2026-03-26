@@ -254,8 +254,7 @@ struct ContentView: View {
         treeMutationRevision: Int,
         motionPolicy: ContentTransitionMotionPolicy
     ) -> some View {
-        if contentPhase == .scanned,
-           let rootNode = state.scannerViewModel.rootNode {
+        if let rootNode = state.scannerViewModel.rootNode {
             let node = state.scannerViewModel.currentNode ?? rootNode
 
             VStack(spacing: 0) {
@@ -368,7 +367,11 @@ struct ContentView: View {
     }
 
     private func visibleVisualization(for state: AppState) -> AppState.VisualizationType {
-        state.selectedVisualization == .fileTree ? .treemap : state.selectedVisualization
+        if state.scannerViewModel.isIncrementalScanInProgress {
+            return .treemap
+        }
+
+        return state.selectedVisualization == .fileTree ? .treemap : state.selectedVisualization
     }
 
     @ViewBuilder
@@ -403,13 +406,14 @@ struct ContentView: View {
 
     @ViewBuilder
     private func mainVisualization(node: FileNode, treeMutationRevision: Int) -> some View {
-        switch appState.selectedVisualization {
+        switch visibleVisualization(for: appState) {
         case .treemap:
             TreemapView(
                 node: node,
                 highlightedNode: appState.highlightedNode,
                 onSelect: { navigate(to: $0) },
                 layoutRevision: treeMutationRevision,
+                incrementalScanInProgress: appState.scannerViewModel.isIncrementalScanInProgress,
                 onMoveToTrash: { appState.scannerViewModel.beginMoveToTrash($0) },
                 onCommitMoveToTrash: commitMoveToTrash
             )
@@ -427,6 +431,7 @@ struct ContentView: View {
                 highlightedNode: appState.highlightedNode,
                 onSelect: { navigate(to: $0) },
                 layoutRevision: treeMutationRevision,
+                incrementalScanInProgress: appState.scannerViewModel.isIncrementalScanInProgress,
                 onMoveToTrash: { appState.scannerViewModel.beginMoveToTrash($0) },
                 onCommitMoveToTrash: commitMoveToTrash
             )

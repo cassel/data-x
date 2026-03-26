@@ -17,40 +17,105 @@ actor ScannerService {
     private var bytesScanned: UInt64 = 0
     private var startTime = Date()
     private var lastProgressUpdate = Date()
+    private var activeScanID: UUID?
+    private var activeScanTask: Task<Void, Never>?
+    private var activeContinuation: AsyncStream<ScanEvent>.Continuation?
 
     func scan(
         directory: URL,
         maxDepth: Int? = nil,
-        includeHidden: Bool = false,
-        progress: AsyncStream<ScanProgress>.Continuation
-    ) async throws -> FileNodeData {
+        includeHidden: Bool = false
+    ) -> AsyncStream<ScanEvent> {
+        cancelActiveScanIfNeeded()
         resetState()
-        progress.yield(makeProgress(
-            currentPath: Self.displayName(for: directory),
-            isComplete: false
-        ))
-
-        defer {
-            progress.finish()
-        }
-
-        let root = try await scanDirectory(
-            at: directory,
-            depth: 0,
-            maxDepth: maxDepth,
-            includeHidden: includeHidden,
-            modificationDate: nil,
-            directorySize: 0,
-            progress: progress
+        let scanID = UUID()
+        let standardizedDirectory = directory.standardizedFileURL
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: ScanEvent.self,
+            bufferingPolicy: .unbounded
         )
 
-        try throwIfCancelled()
-        progress.yield(makeProgress(currentPath: directory.path, isComplete: true))
-        return root
+        activeScanID = scanID
+        activeContinuation = continuation
+        activeScanTask = Task { [standardizedDirectory, maxDepth, includeHidden] in
+            await self.runScan(
+                id: scanID,
+                directory: standardizedDirectory,
+                maxDepth: maxDepth,
+                includeHidden: includeHidden,
+                continuation: continuation
+            )
+        }
+
+        return stream
     }
 
     func cancel() {
         isCancelled = true
+        activeScanID = nil
+        activeScanTask?.cancel()
+        activeScanTask = nil
+        activeContinuation?.finish()
+        activeContinuation = nil
+    }
+
+    private func cancelActiveScanIfNeeded() {
+        activeScanID = nil
+        activeScanTask?.cancel()
+        activeScanTask = nil
+        activeContinuation?.finish()
+        activeContinuation = nil
+    }
+
+    private func runScan(
+        id: UUID,
+        directory: URL,
+        maxDepth: Int?,
+        includeHidden: Bool,
+        continuation: AsyncStream<ScanEvent>.Continuation
+    ) async {
+        defer {
+            continuation.finish()
+
+            if activeScanID == id {
+                activeScanID = nil
+                activeScanTask = nil
+                activeContinuation = nil
+            }
+        }
+
+        emit(
+            .progress(
+                makeProgress(
+                    currentPath: Self.displayName(for: directory),
+                    isComplete: false
+                )
+            ),
+            continuation: continuation
+        )
+
+        do {
+            let root = try await scanDirectory(
+                at: directory,
+                depth: 0,
+                maxDepth: maxDepth,
+                includeHidden: includeHidden,
+                modificationDate: nil,
+                directorySize: 0,
+                continuation: continuation
+            )
+
+            try throwIfCancelled()
+            emit(
+                .progress(makeProgress(currentPath: directory.path, isComplete: true)),
+                continuation: continuation
+            )
+            emit(.complete(root), continuation: continuation)
+        } catch is CancellationError {
+            return
+        } catch {
+            return
+        }
     }
 
     private func resetState() {
@@ -71,7 +136,7 @@ actor ScannerService {
 
     private func emitProgress(
         currentPath: String,
-        progress: AsyncStream<ScanProgress>.Continuation
+        progress: AsyncStream<ScanEvent>.Continuation
     ) {
         let now = Date()
         let shouldEmit = now.timeIntervalSince(lastProgressUpdate) >= Self.progressUpdateInterval
@@ -80,7 +145,10 @@ actor ScannerService {
         guard shouldEmit else { return }
 
         lastProgressUpdate = now
-        progress.yield(makeProgress(currentPath: currentPath, isComplete: false))
+        emit(
+            .progress(makeProgress(currentPath: currentPath, isComplete: false)),
+            continuation: progress
+        )
     }
 
     private func makeProgress(currentPath: String, isComplete: Bool) -> ScanProgress {
@@ -94,6 +162,20 @@ actor ScannerService {
         )
     }
 
+    private func emit(
+        _ event: ScanEvent,
+        continuation: AsyncStream<ScanEvent>.Continuation
+    ) {
+        switch continuation.yield(event) {
+        case .terminated:
+            isCancelled = true
+        case .dropped, .enqueued:
+            break
+        @unknown default:
+            break
+        }
+    }
+
     private func scanDirectory(
         at directory: URL,
         depth: Int,
@@ -101,13 +183,14 @@ actor ScannerService {
         includeHidden: Bool,
         modificationDate: Date?,
         directorySize: UInt64,
-        progress: AsyncStream<ScanProgress>.Continuation
+        continuation: AsyncStream<ScanEvent>.Continuation
     ) async throws -> FileNodeData {
         try throwIfCancelled()
+        let standardizedDirectory = directory.standardizedFileURL
 
         if let maxDepth, depth >= maxDepth {
             return FileNodeData(
-                url: directory,
+                url: standardizedDirectory,
                 isDirectory: true,
                 isSymlink: false,
                 size: directorySize,
@@ -119,8 +202,8 @@ actor ScannerService {
 
         directoriesScanned += 1
         emitProgress(
-            currentPath: Self.displayName(for: directory),
-            progress: progress
+            currentPath: Self.displayName(for: standardizedDirectory),
+            progress: continuation
         )
         try await maybeYieldTraversalControl()
 
@@ -132,13 +215,13 @@ actor ScannerService {
         let contents: [URL]
         do {
             contents = try FileManager.default.contentsOfDirectory(
-                at: directory,
+                at: standardizedDirectory,
                 includingPropertiesForKeys: Array(Self.resourceKeys),
                 options: options
             )
         } catch {
             return FileNodeData(
-                url: directory,
+                url: standardizedDirectory,
                 isDirectory: true,
                 isSymlink: false,
                 size: directorySize,
@@ -155,7 +238,8 @@ actor ScannerService {
             try await maybeYieldTraversalControl()
 
             do {
-                let resourceValues = try url.resourceValues(forKeys: Self.resourceKeys)
+                let standardizedURL = url.standardizedFileURL
+                let resourceValues = try standardizedURL.resourceValues(forKeys: Self.resourceKeys)
 
                 let isDirectory = resourceValues.isDirectory ?? false
                 let isSymlink = resourceValues.isSymbolicLink ?? false
@@ -166,19 +250,19 @@ actor ScannerService {
 
                 if isDirectory && !isSymlink {
                     child = try await scanDirectory(
-                        at: url,
+                        at: standardizedURL,
                         depth: depth + 1,
                         maxDepth: maxDepth,
                         includeHidden: includeHidden,
                         modificationDate: modDate,
                         directorySize: fileSize,
-                        progress: progress
+                        continuation: continuation
                     )
                 } else {
                     filesScanned += 1
                     bytesScanned += fileSize
                     child = FileNodeData(
-                        url: url,
+                        url: standardizedURL,
                         isDirectory: isDirectory,
                         isSymlink: isSymlink,
                         size: fileSize,
@@ -187,12 +271,16 @@ actor ScannerService {
                         children: nil
                     )
                     emitProgress(
-                        currentPath: Self.displayName(for: url),
-                        progress: progress
+                        currentPath: Self.displayName(for: standardizedURL),
+                        progress: continuation
                     )
                 }
 
                 children.append(child)
+
+                if depth == 0 {
+                    emit(.partialTree(child), continuation: continuation)
+                }
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
@@ -205,7 +293,7 @@ actor ScannerService {
         let aggregateFileCount = sortedChildren.reduce(0) { $0 + $1.fileCount }
 
         return FileNodeData(
-            url: directory,
+            url: standardizedDirectory,
             isDirectory: true,
             isSymlink: false,
             size: aggregateSize,

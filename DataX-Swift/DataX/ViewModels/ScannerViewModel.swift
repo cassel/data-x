@@ -10,6 +10,7 @@ final class ScannerViewModel {
     var currentNode: FileNode?
     var navigationStack: [FileNode] = []
     var isScanning = false
+    var isIncrementalScanInProgress = false
     var progress: ScanProgress?
     var diskInfo: DiskInfo?
     var error: Error?
@@ -21,13 +22,13 @@ final class ScannerViewModel {
 
     @ObservationIgnored private var scanner = ScannerService()
     @ObservationIgnored private var scanTask: Task<Void, Never>?
-    @ObservationIgnored private var progressTask: Task<Void, Never>?
     @ObservationIgnored private var activeScanSessionID: UUID?
+    @ObservationIgnored private var stableNodeIDsByPath: [String: UUID] = [:]
 
     // MARK: - Computed Properties
 
     var canNavigateBack: Bool {
-        navigationStack.count > 1
+        !isIncrementalScanInProgress && navigationStack.count > 1
     }
 
     var currentPath: String {
@@ -39,9 +40,14 @@ final class ScannerViewModel {
     }
 
     var displayedChildren: [FileNode]? {
+        if isIncrementalScanInProgress {
+            return currentNode?.sortedChildren
+        }
+
         if !searchQuery.isEmpty {
             return searchResults
         }
+
         return currentNode?.sortedChildren
     }
 
@@ -52,12 +58,14 @@ final class ScannerViewModel {
 
         let sessionID = UUID()
         let startTime = Date()
-        let directoryName = Self.displayName(for: directory)
+        let standardizedDirectory = directory.standardizedFileURL
+        let directoryName = Self.displayName(for: standardizedDirectory)
         let scanner = ScannerService()
 
         self.scanner = scanner
         activeScanSessionID = sessionID
         isScanning = true
+        isIncrementalScanInProgress = true
         error = nil
         progress = ScanProgress(
             filesScanned: 0,
@@ -68,60 +76,53 @@ final class ScannerViewModel {
             isComplete: false
         )
         resetSearch()
+        diskInfo = try? DiskInfo.forPath(standardizedDirectory)
+        prepareIncrementalRoot(for: standardizedDirectory)
 
-        // Get disk info (simplified method that won't hang)
-        diskInfo = try? DiskInfo.forPath(directory)
-
-        var progressContinuation: AsyncStream<ScanProgress>.Continuation!
-        let progressStream = AsyncStream<ScanProgress>(bufferingPolicy: .bufferingNewest(1)) { continuation in
-            progressContinuation = continuation
-        }
-
-        let progressTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-
-            for await update in progressStream {
-                guard self.activeScanSessionID == sessionID else { continue }
-                self.progress = update
-            }
-        }
-        self.progressTask = progressTask
-
-        scanTask = Task { [weak self, scanner] in
+        scanTask = Task { [weak self, scanner, standardizedDirectory] in
             guard let self else {
-                progressContinuation.finish()
+                await scanner.cancel()
                 return
             }
 
-            do {
-                let result = try await scanner.scan(
-                    directory: directory,
-                    progress: progressContinuation
-                )
-                await progressTask.value
-                self.completeLocalScan(with: result, sessionID: sessionID)
-            } catch is CancellationError {
-                await progressTask.value
-                self.finishCancelledLocalScan(sessionID: sessionID)
-            } catch {
-                await progressTask.value
-                self.finishFailedLocalScan(error, sessionID: sessionID)
+            let events = await scanner.scan(directory: standardizedDirectory)
+            var didComplete = false
+
+            for await event in events {
+                guard !Task.isCancelled else { break }
+                guard self.activeScanSessionID == sessionID else { break }
+
+                if case .complete = event {
+                    didComplete = true
+                }
+
+                self.handleLocalScanEvent(event, sessionID: sessionID)
             }
+
+            guard self.activeScanSessionID == sessionID else { return }
+            guard !didComplete else { return }
+
+            self.finishCancelledLocalScan(sessionID: sessionID)
         }
     }
 
     func cancelScan() {
-        cancelActiveLocalScan(resetScanningState: true)
+        if activeScanSessionID != nil {
+            cancelActiveLocalScan(resetScanningState: true)
+            return
+        }
+
+        isScanning = false
+        progress = nil
     }
 
     func navigateTo(_ node: FileNode) {
-        guard node.isDirectory else { return }
+        guard !isIncrementalScanInProgress, node.isDirectory else { return }
 
         currentNode = node
         searchQuery = ""
         searchResults = []
 
-        // Check if we're navigating to a node already in the stack
         if let index = navigationStack.firstIndex(where: { $0.id == node.id }) {
             navigationStack = Array(navigationStack.prefix(through: index))
         } else {
@@ -130,7 +131,7 @@ final class ScannerViewModel {
     }
 
     func navigateBack() {
-        guard navigationStack.count > 1 else { return }
+        guard !isIncrementalScanInProgress, navigationStack.count > 1 else { return }
         navigationStack.removeLast()
         currentNode = navigationStack.last
         searchQuery = ""
@@ -138,7 +139,7 @@ final class ScannerViewModel {
     }
 
     func navigateToRoot() {
-        guard let root = rootNode else { return }
+        guard !isIncrementalScanInProgress, let root = rootNode else { return }
         currentNode = root
         navigationStack = [root]
         searchQuery = ""
@@ -146,7 +147,7 @@ final class ScannerViewModel {
     }
 
     func navigateToBreadcrumb(at index: Int) {
-        guard index < navigationStack.count else { return }
+        guard !isIncrementalScanInProgress, index < navigationStack.count else { return }
         let node = navigationStack[index]
         currentNode = node
         navigationStack = Array(navigationStack.prefix(through: index))
@@ -157,6 +158,11 @@ final class ScannerViewModel {
     // MARK: - Search
 
     func performSearch(_ query: String) {
+        guard !isIncrementalScanInProgress else {
+            resetSearch()
+            return
+        }
+
         searchQuery = query
 
         guard !query.isEmpty, let root = currentNode else {
@@ -239,7 +245,9 @@ final class ScannerViewModel {
 
     func beginRemoteScan() {
         cancelActiveLocalScan(resetScanningState: false)
+        clearVisibleTree(resetIdentityState: true)
         isScanning = true
+        isIncrementalScanInProgress = false
         error = nil
         progress = .initial
         resetSearch()
@@ -254,12 +262,15 @@ final class ScannerViewModel {
         currentNode = root
         navigationStack = [root]
         isScanning = false
+        isIncrementalScanInProgress = false
         error = nil
+        treeMutationRevision += 1
     }
 
     func failRemoteScan(with error: Error) {
         self.error = error
         isScanning = false
+        isIncrementalScanInProgress = false
         progress = nil
     }
 
@@ -273,14 +284,11 @@ final class ScannerViewModel {
     private func cancelActiveLocalScan(resetScanningState: Bool) {
         let scanner = self.scanner
         let scanTask = self.scanTask
-        let progressTask = self.progressTask
 
         activeScanSessionID = nil
         self.scanTask = nil
-        self.progressTask = nil
 
         scanTask?.cancel()
-        progressTask?.cancel()
 
         Task {
             await scanner.cancel()
@@ -288,19 +296,91 @@ final class ScannerViewModel {
 
         if resetScanningState {
             isScanning = false
+            isIncrementalScanInProgress = false
             progress = nil
+            clearVisibleTree(resetIdentityState: true)
         }
+    }
+
+    private func handleLocalScanEvent(_ event: ScanEvent, sessionID: UUID) {
+        guard activeScanSessionID == sessionID else { return }
+
+        switch event {
+        case .progress(let progress):
+            self.progress = progress
+        case .partialTree(let subtree):
+            mergePartialTree(subtree)
+        case .complete(let finalTree):
+            completeLocalScan(with: finalTree, sessionID: sessionID)
+        }
+    }
+
+    private func prepareIncrementalRoot(for directory: URL) {
+        stableNodeIDsByPath.removeAll()
+
+        let path = directory.standardizedFileURL.path
+        let rootID = stableID(for: path)
+        let root = FileNode(
+            id: rootID,
+            name: Self.displayName(for: directory),
+            path: directory.standardizedFileURL,
+            isDirectory: true,
+            isHidden: directory.lastPathComponent.hasPrefix("."),
+            isSymlink: false,
+            fileExtension: nil,
+            modificationDate: nil,
+            size: 0,
+            fileCount: 0,
+            children: []
+        )
+
+        rootNode = root
+        currentNode = root
+        navigationStack = [root]
+        treeMutationRevision += 1
+    }
+
+    private func mergePartialTree(_ subtree: FileNodeData) {
+        guard let rootNode else { return }
+
+        let parentURL = subtree.url.deletingLastPathComponent().standardizedFileURL
+        guard let parent = rootNode.findNode(withPath: parentURL) else { return }
+
+        let subtreePath = standardizedPath(for: subtree.url)
+        var children = parent.children ?? []
+
+        if let index = children.firstIndex(where: { standardizedPath(for: $0.path) == subtreePath }) {
+            reconcile(children[index], with: subtree)
+        } else {
+            children.append(makeNode(from: subtree))
+        }
+
+        parent.children = children.sorted { $0.size > $1.size }
+        rollUpAggregateMetrics(startingAt: parent)
+        anchorNavigationToRoot()
+        treeMutationRevision += 1
     }
 
     private func completeLocalScan(with result: FileNodeData, sessionID: UUID) {
         guard activeScanSessionID == sessionID else { return }
 
-        let root = result.toFileNode()
-        rootNode = root
-        currentNode = root
-        navigationStack = [root]
+        if let rootNode,
+           standardizedPath(for: rootNode.path) == standardizedPath(for: result.url) {
+            reconcile(rootNode, with: result)
+        } else {
+            rootNode = makeNode(from: result)
+        }
+
+        if let rootNode {
+            currentNode = rootNode
+            navigationStack = [rootNode]
+        }
+
+        resetSearch()
         isScanning = false
+        isIncrementalScanInProgress = false
         error = nil
+        treeMutationRevision += 1
 
         finishLocalScan(sessionID: sessionID)
     }
@@ -309,16 +389,9 @@ final class ScannerViewModel {
         guard activeScanSessionID == sessionID else { return }
 
         isScanning = false
+        isIncrementalScanInProgress = false
         progress = nil
-        finishLocalScan(sessionID: sessionID)
-    }
-
-    private func finishFailedLocalScan(_ error: Error, sessionID: UUID) {
-        guard activeScanSessionID == sessionID else { return }
-
-        self.error = error
-        isScanning = false
-        progress = nil
+        clearVisibleTree(resetIdentityState: true)
         finishLocalScan(sessionID: sessionID)
     }
 
@@ -327,12 +400,109 @@ final class ScannerViewModel {
 
         activeScanSessionID = nil
         scanTask = nil
-        progressTask = nil
     }
 
     private func resetSearch() {
         searchQuery = ""
         searchResults = []
+    }
+
+    private func anchorNavigationToRoot() {
+        guard isIncrementalScanInProgress, let rootNode else { return }
+
+        currentNode = rootNode
+        navigationStack = [rootNode]
+        resetSearch()
+    }
+
+    private func clearVisibleTree(resetIdentityState: Bool) {
+        let hadVisibleTree = rootNode != nil || currentNode != nil || !navigationStack.isEmpty
+
+        rootNode = nil
+        currentNode = nil
+        navigationStack = []
+
+        if resetIdentityState {
+            stableNodeIDsByPath.removeAll()
+        }
+
+        if hadVisibleTree {
+            treeMutationRevision += 1
+        }
+    }
+
+    private func standardizedPath(for url: URL) -> String {
+        url.standardizedFileURL.path
+    }
+
+    private func stableID(for path: String) -> UUID {
+        if let id = stableNodeIDsByPath[path] {
+            return id
+        }
+
+        let id = UUID()
+        stableNodeIDsByPath[path] = id
+        return id
+    }
+
+    private func makeNode(from data: FileNodeData) -> FileNode {
+        let standardizedURL = data.url.standardizedFileURL
+        let path = standardizedURL.path
+        let id = stableID(for: path)
+        let children = data.children?.map(makeNode(from:))
+
+        return FileNode(
+            id: id,
+            name: Self.displayName(for: standardizedURL),
+            path: standardizedURL,
+            isDirectory: data.isDirectory,
+            isHidden: standardizedURL.lastPathComponent.hasPrefix("."),
+            isSymlink: data.isSymlink,
+            fileExtension: data.isDirectory ? nil : standardizedURL.pathExtension.lowercased(),
+            modificationDate: data.modificationDate,
+            size: data.size,
+            fileCount: data.fileCount,
+            children: children
+        )
+    }
+
+    private func reconcile(_ node: FileNode, with data: FileNodeData) {
+        node.size = data.size
+        node.fileCount = data.fileCount
+
+        guard data.isDirectory else {
+            node.children = nil
+            return
+        }
+
+        var existingChildrenByPath = Dictionary(
+            uniqueKeysWithValues: (node.children ?? []).map { (standardizedPath(for: $0.path), $0) }
+        )
+        let reconciledChildren = (data.children ?? []).map { childData -> FileNode in
+            let childPath = standardizedPath(for: childData.url)
+
+            if let existing = existingChildrenByPath.removeValue(forKey: childPath) {
+                reconcile(existing, with: childData)
+                return existing
+            }
+
+            return makeNode(from: childData)
+        }
+
+        node.children = reconciledChildren
+    }
+
+    private func rollUpAggregateMetrics(startingAt node: FileNode) {
+        guard node.isDirectory else { return }
+
+        let sortedChildren = (node.children ?? []).sorted { $0.size > $1.size }
+        node.children = sortedChildren
+        node.size = sortedChildren.reduce(0) { $0 + $1.size }
+        node.fileCount = sortedChildren.reduce(0) { $0 + $1.fileCount }
+
+        if let parent = findParent(of: node, in: rootNode) {
+            rollUpAggregateMetrics(startingAt: parent)
+        }
     }
 
     private func commitNodeRemoval(_ node: FileNode) {
