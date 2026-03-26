@@ -77,6 +77,7 @@ final class AppState {
     }
 
     func returnHome() {
+        scannerViewModel.invalidateDuplicateReport()
         scannerViewModel.rootNode = nil
         scannerViewModel.currentNode = nil
         scannerViewModel.navigationStack = []

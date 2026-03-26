@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		04E343F193BBCDA592094A6B /* FileOperationsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36B3D10486BE8FD48BEBED11 /* FileOperationsService.swift */; };
+		5D4C3B2A1908171615141312 /* DuplicateDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D4C3B2A1908171615141313 /* DuplicateDetector.swift */; };
+		6E5D4C3B2A190817161514131 /* DuplicateCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E5D4C3B2A190817161514132 /* DuplicateCard.swift */; };
 		0F1A2B3C4D5E6F708192A3B4 /* FileTypeLegendOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F3A4B5C6D7E8F901A2B3C4D /* FileTypeLegendOverlay.swift */; };
 		13899A7093E8F6E52DE3BC95 /* FileNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D1C9374C17D1CECE12A62D8 /* FileNode.swift */; };
 		1E1B0A9034E4B89F43BB2743 /* SSHService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0800A78DED4E215E53D62A0E /* SSHService.swift */; };
@@ -58,6 +60,8 @@
 		74B1E6C3D94A4F6F8E2C1B7A /* ScanEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanEvent.swift; sourceTree = "<group>"; };
 		2F3A4B5C6D7E8F901A2B3C4D /* FileTypeLegendOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTypeLegendOverlay.swift; sourceTree = "<group>"; };
 		36747BF62C4E860F714CF69F /* SSHSidebarSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHSidebarSection.swift; sourceTree = "<group>"; };
+		5D4C3B2A1908171615141313 /* DuplicateDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateDetector.swift; sourceTree = "<group>"; };
+		6E5D4C3B2A190817161514132 /* DuplicateCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateCard.swift; sourceTree = "<group>"; };
 		3F4A5B6C7D8E9F001A2B3C4D /* SSHToolbarPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHToolbarPopover.swift; sourceTree = "<group>"; };
 		36B3D10486BE8FD48BEBED11 /* FileOperationsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileOperationsService.swift; sourceTree = "<group>"; };
 		3D1C9374C17D1CECE12A62D8 /* FileNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileNode.swift; sourceTree = "<group>"; };
@@ -118,6 +122,7 @@
 		26844159918776DDC1F18B54 /* Duplicates */ = {
 			isa = PBXGroup;
 			children = (
+				5D4C3B2A1908171615141313 /* DuplicateDetector.swift */,
 			);
 			path = Duplicates;
 			sourceTree = "<group>";
@@ -157,6 +162,7 @@
 		4F5A6B7C8D9E0F112A3B4C5D /* Toolbar */ = {
 			isa = PBXGroup;
 			children = (
+				6E5D4C3B2A190817161514132 /* DuplicateCard.swift */,
 				2F3A4B5C6D7E8F901A2B3C4D /* FileTypeLegendOverlay.swift */,
 				A1B2C3D4E5F60718293A4B5D /* InsightsPopover.swift */,
 				3F4A5B6C7D8E9F001A2B3C4D /* SSHToolbarPopover.swift */,
@@ -358,6 +364,8 @@
 				9762A6933EEC94ECCD5D688C /* ContentView.swift in Sources */,
 				D395AD06C04852E1C87F33F3 /* DataXApp.swift in Sources */,
 				D852725830D6D693143E0216 /* DiskInfo.swift in Sources */,
+				5D4C3B2A1908171615141312 /* DuplicateDetector.swift in Sources */,
+				6E5D4C3B2A190817161514131 /* DuplicateCard.swift in Sources */,
 				A7E959C1CF10F7F7838BF920 /* FileCategory.swift in Sources */,
 				13899A7093E8F6E52DE3BC95 /* FileNode.swift in Sources */,
 				04E343F193BBCDA592094A6B /* FileOperationsService.swift in Sources */,

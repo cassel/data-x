@@ -165,6 +165,7 @@ final class ScannerViewModel {
     var diskInfo: DiskInfo?
     var error: Error?
     var insights = ScanInsights.empty
+    var duplicateReportState: DuplicateReportState = .idle
     var searchQuery = ""
     var searchResults: [FileNode] = []
     var treeMutationRevision = 0
@@ -173,8 +174,15 @@ final class ScannerViewModel {
 
     @ObservationIgnored private var scanner = ScannerService()
     @ObservationIgnored private var scanTask: Task<Void, Never>?
+    @ObservationIgnored private let duplicateDetector: any DuplicateDetecting
+    @ObservationIgnored private var duplicateScanTask: Task<Void, Never>?
     @ObservationIgnored private var activeScanSessionID: UUID?
+    @ObservationIgnored private var duplicateReportRevision: Int?
     @ObservationIgnored private var stableNodeIDsByPath: [String: UUID] = [:]
+
+    init(duplicateDetector: any DuplicateDetecting = DuplicateDetector()) {
+        self.duplicateDetector = duplicateDetector
+    }
 
     // MARK: - Computed Properties
 
@@ -206,6 +214,7 @@ final class ScannerViewModel {
 
     func scan(directory: URL) {
         cancelActiveLocalScan(resetScanningState: false)
+        invalidateDuplicateReport()
 
         let sessionID = UUID()
         let startTime = Date()
@@ -352,6 +361,64 @@ final class ScannerViewModel {
         insights = ScanInsights.make(from: rootNode)
     }
 
+    func scanForDuplicates(forceRefresh: Bool = false) {
+        guard !isScanning,
+              !isIncrementalScanInProgress,
+              let rootNode else {
+            invalidateDuplicateReport()
+            return
+        }
+
+        if case .loading = duplicateReportState {
+            return
+        }
+
+        let currentRevision = treeMutationRevision
+
+        if !forceRefresh,
+           duplicateReportRevision == currentRevision,
+           case .loaded = duplicateReportState {
+            return
+        }
+
+        let candidates = DuplicateCandidate.makeList(from: rootNode)
+
+        if candidates.count < 2 {
+            duplicateReportState = .loaded(DuplicateReport(groups: [], unreadablePaths: []))
+            duplicateReportRevision = currentRevision
+            return
+        }
+
+        duplicateScanTask?.cancel()
+        duplicateReportState = .loading
+        duplicateReportRevision = nil
+
+        let detector = duplicateDetector
+
+        duplicateScanTask = Task.detached(priority: .utility) { [weak self, detector, candidates, currentRevision] in
+            do {
+                let report = try await detector.detectDuplicates(in: candidates)
+                guard !Task.isCancelled else { return }
+                await self?.finishDuplicateReport(report, revision: currentRevision)
+            } catch is CancellationError {
+                return
+            } catch {
+                await self?.failDuplicateReport(error, revision: currentRevision)
+            }
+        }
+    }
+
+    func invalidateDuplicateReport() {
+        duplicateScanTask?.cancel()
+        duplicateScanTask = nil
+        duplicateReportRevision = nil
+        duplicateReportState = .idle
+    }
+
+    func node(atPath path: String) -> FileNode? {
+        rootNode?.findNode(withPath: URL(fileURLWithPath: path).standardizedFileURL)
+    }
+
     // MARK: - File Operations
 
     func revealInFinder(_ node: FileNode) {
@@ -429,6 +496,7 @@ final class ScannerViewModel {
         isIncrementalScanInProgress = false
         error = nil
         refreshInsightRankings()
+        invalidateDuplicateReport()
         treeMutationRevision += 1
     }
 
@@ -437,6 +505,7 @@ final class ScannerViewModel {
         isScanning = false
         isIncrementalScanInProgress = false
         resetInsightRankings()
+        invalidateDuplicateReport()
         progress = nil
     }
 
@@ -547,6 +616,7 @@ final class ScannerViewModel {
         isIncrementalScanInProgress = false
         error = nil
         refreshInsightRankings()
+        invalidateDuplicateReport()
         treeMutationRevision += 1
 
         finishLocalScan(sessionID: sessionID)
@@ -589,6 +659,7 @@ final class ScannerViewModel {
     private func clearVisibleTree(resetIdentityState: Bool) {
         let hadVisibleTree = rootNode != nil || currentNode != nil || !navigationStack.isEmpty
 
+        invalidateDuplicateReport()
         rootNode = nil
         currentNode = nil
         navigationStack = []
@@ -679,6 +750,7 @@ final class ScannerViewModel {
     }
 
     private func commitNodeRemoval(_ node: FileNode) {
+        invalidateDuplicateReport()
         pruneSearchResults(removing: node)
 
         if rootNode?.id == node.id {
@@ -744,5 +816,31 @@ final class ScannerViewModel {
 
     private func pruneSearchResults(removing node: FileNode) {
         searchResults.removeAll { node.containsNode(withID: $0.id) }
+    }
+
+    private func finishDuplicateReport(_ report: DuplicateReport, revision: Int) {
+        guard treeMutationRevision == revision,
+              !isScanning,
+              rootNode != nil else {
+            duplicateScanTask = nil
+            return
+        }
+
+        duplicateReportState = .loaded(report)
+        duplicateReportRevision = revision
+        duplicateScanTask = nil
+    }
+
+    private func failDuplicateReport(_ error: Error, revision: Int) {
+        guard treeMutationRevision == revision,
+              !isScanning,
+              rootNode != nil else {
+            duplicateScanTask = nil
+            return
+        }
+
+        duplicateReportState = .failed("Duplicate scan failed: \(error.localizedDescription)")
+        duplicateReportRevision = nil
+        duplicateScanTask = nil
     }
 }

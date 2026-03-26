@@ -16,10 +16,26 @@ struct InsightsToolbarPopoverButton: View {
             attachmentAnchor: .rect(.bounds),
             arrowEdge: .top
         ) {
-            InsightsPopover(insights: appState.scannerViewModel.insights) { node in
-                appState.selectInsight(node)
-                isPopoverPresented = false
-            }
+            InsightsPopover(
+                insights: appState.scannerViewModel.insights,
+                duplicateState: appState.scannerViewModel.duplicateReportState,
+                onSelectNode: { node in
+                    appState.selectInsight(node)
+                    isPopoverPresented = false
+                },
+                onRunDuplicateScan: { forceRefresh in
+                    appState.scannerViewModel.scanForDuplicates(forceRefresh: forceRefresh)
+                },
+                onSelectDuplicatePath: { path in
+                    guard let node = appState.scannerViewModel.node(atPath: path) else { return }
+                    appState.selectInsight(node)
+                    isPopoverPresented = false
+                },
+                onMoveDuplicateToTrash: { path in
+                    guard let node = appState.scannerViewModel.node(atPath: path) else { return }
+                    appState.scannerViewModel.moveToTrash(node)
+                }
+            )
         }
         .onChange(of: appState.scannerViewModel.rootNode?.id) { _, rootID in
             if rootID == nil {
@@ -36,7 +52,11 @@ struct InsightsToolbarPopoverButton: View {
 
 struct InsightsPopover: View {
     let insights: ScanInsights
+    let duplicateState: DuplicateReportState
     let onSelectNode: (FileNode) -> Void
+    let onRunDuplicateScan: (Bool) -> Void
+    let onSelectDuplicatePath: (String) -> Void
+    let onMoveDuplicateToTrash: (String) -> Void
 
     var body: some View {
         List {
@@ -53,6 +73,7 @@ struct InsightsPopover: View {
             if let oldFiles = insights.oldFiles {
                 oldFilesSection(report: oldFiles)
             }
+            duplicatesSection
         }
         .listStyle(.inset(alternatesRowBackgrounds: true))
         .frame(width: 560, height: 420)
@@ -112,6 +133,77 @@ struct InsightsPopover: View {
         } header: {
             Text("Old Files")
         }
+    }
+
+    private var duplicatesSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                Button(duplicateState.primaryActionTitle) {
+                    onRunDuplicateScan(duplicateState.shouldForceRefresh)
+                }
+                .disabled(duplicateState.isLoading)
+
+                if duplicateState.isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Spacer()
+            }
+            .padding(.vertical, 4)
+
+            switch duplicateState {
+            case .idle:
+                duplicatePlaceholderRow(
+                    "Run an explicit duplicate scan to confirm repeated files from the completed scan tree."
+                )
+            case .loading:
+                duplicatePlaceholderRow(
+                    "Hashing duplicate candidates from the completed scan. You can keep using the rest of the app while this runs."
+                )
+            case .failed(let message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+            case .loaded(let report):
+                if let warningMessage = report.warningMessage {
+                    Text(warningMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                }
+
+                if report.hasResults {
+                    Text(report.summaryText)
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+
+                    ForEach(report.groups) { group in
+                        DuplicateCard(
+                            group: group,
+                            onSelectPath: onSelectDuplicatePath,
+                            onMoveToTrash: onMoveDuplicateToTrash
+                        )
+                    }
+                } else {
+                    duplicatePlaceholderRow(report.emptyStateText)
+                }
+            }
+        } header: {
+            Text("Duplicates")
+        }
+    }
+
+    private func duplicatePlaceholderRow(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
     }
 }
 
