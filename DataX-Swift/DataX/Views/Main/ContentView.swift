@@ -1,4 +1,5 @@
 import AppKit
+import SwiftData
 import SwiftUI
 
 enum ContentViewPhase: Equatable {
@@ -162,6 +163,7 @@ private struct ShellAlertState: Identifiable {
 struct ContentView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.undoManager) private var undoManager
     @Namespace private var transitionNamespace
     @State private var isLegendVisible = false
@@ -195,6 +197,9 @@ struct ContentView: View {
             allowsMultipleSelection: false
         ) { result in
             state.handleFolderImport(result)
+        }
+        .task {
+            state.scannerViewModel.configurePersistence(modelContext: modelContext)
         }
         .onChange(of: state.scannerViewModel.rootNode?.id) { _, _ in
             isLegendVisible = false
@@ -980,5 +985,6 @@ struct SettingsView: View {
 #Preview {
     ContentView()
         .environment(AppState())
+        .modelContainer(for: ScanRecord.self, inMemory: true)
         .frame(width: 1200, height: 700)
 }

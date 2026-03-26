@@ -1,4 +1,6 @@
 import Foundation
+import OSLog
+import SwiftData
 import SwiftUI
 
 struct OldFileInsights: Equatable {
@@ -208,6 +210,10 @@ final class ScannerViewModel {
     private static let undoMoveToTrashFailedTitle = "Undo Move to Trash Failed"
     private static let undoMoveToTrashLimitedTitle = "Undo Move to Trash Limited"
     private static let deleteFailedTitle = "Delete Failed"
+    private static let persistenceLogger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "DataX",
+        category: "ScanHistory"
+    )
 
     // MARK: - State
 
@@ -238,6 +244,7 @@ final class ScannerViewModel {
     @ObservationIgnored private var currentTreeSessionID = UUID()
     @ObservationIgnored private var duplicateReportRevision: Int?
     @ObservationIgnored private var stableNodeIDsByPath: [String: UUID] = [:]
+    @ObservationIgnored private var modelContext: ModelContext?
 
     init(
         duplicateDetector: any DuplicateDetecting = DuplicateDetector(),
@@ -274,6 +281,10 @@ final class ScannerViewModel {
     }
 
     // MARK: - Actions
+
+    func configurePersistence(modelContext: ModelContext) {
+        self.modelContext = modelContext
+    }
 
     func scan(directory: URL) {
         cancelActiveLocalScan(resetScanningState: false)
@@ -583,15 +594,7 @@ final class ScannerViewModel {
 
     func completeRemoteScan(with root: FileNode) {
         advanceTreeSession()
-        rootNode = root
-        currentNode = root
-        navigationStack = [root]
-        isScanning = false
-        isIncrementalScanInProgress = false
-        clearError()
-        refreshInsightRankings()
-        invalidateDuplicateReport()
-        treeMutationRevision += 1
+        handleCompletedScan(root)
     }
 
     func failRemoteScan(with error: Error) {
@@ -691,6 +694,56 @@ final class ScannerViewModel {
         treeMutationRevision += 1
     }
 
+    func handleCompletedScan(_ root: FileNode, progress: ScanProgress? = nil) {
+        if let progress {
+            self.progress = progress
+        }
+
+        rootNode = root
+        currentNode = root
+        navigationStack = [root]
+        resetSearch()
+        isScanning = false
+        isIncrementalScanInProgress = false
+        clearError()
+        refreshInsightRankings()
+        invalidateDuplicateReport()
+        treeMutationRevision += 1
+
+        persistCompletedScan(root: root, progress: self.progress)
+    }
+
+    func makeScanRecord(
+        root: FileNode,
+        progress: ScanProgress?,
+        timestamp: Date = .now
+    ) throws -> ScanRecord {
+        let duration = progress.map { max(timestamp.timeIntervalSince($0.startTime), 0) } ?? 0
+        let dirCount = if let progress, progress.directoriesScanned > 0 {
+            progress.directoriesScanned
+        } else {
+            directoryCount(in: root)
+        }
+
+        return ScanRecord(
+            rootPath: root.path.path,
+            timestamp: timestamp,
+            totalSize: root.size,
+            duration: duration,
+            fileCount: root.fileCount,
+            dirCount: dirCount,
+            topChildrenJSON: try ScanRecord.encodeTopChildren(from: root)
+        )
+    }
+
+    func directoryCount(in root: FileNode) -> Int {
+        guard root.isDirectory else { return 0 }
+
+        return 1 + (root.children ?? []).reduce(0) { partialResult, child in
+            partialResult + directoryCount(in: child)
+        }
+    }
+
     private func completeLocalScan(with result: FileNodeData, sessionID: UUID) {
         guard activeScanSessionID == sessionID else { return }
 
@@ -702,17 +755,8 @@ final class ScannerViewModel {
         }
 
         if let rootNode {
-            currentNode = rootNode
-            navigationStack = [rootNode]
+            handleCompletedScan(rootNode)
         }
-
-        resetSearch()
-        isScanning = false
-        isIncrementalScanInProgress = false
-        clearError()
-        refreshInsightRankings()
-        invalidateDuplicateReport()
-        treeMutationRevision += 1
 
         finishLocalScan(sessionID: sessionID)
     }
@@ -733,6 +777,20 @@ final class ScannerViewModel {
 
         activeScanSessionID = nil
         scanTask = nil
+    }
+
+    private func persistCompletedScan(root: FileNode, progress: ScanProgress?) {
+        guard let modelContext else { return }
+
+        do {
+            let record = try makeScanRecord(root: root, progress: progress)
+            modelContext.insert(record)
+            try modelContext.save()
+        } catch {
+            Self.persistenceLogger.error(
+                "Failed to persist scan history for \(root.path.path, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     private func resetSearch() {
