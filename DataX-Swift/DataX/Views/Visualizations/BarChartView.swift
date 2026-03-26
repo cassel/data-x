@@ -5,8 +5,6 @@ struct BarChartView: View {
     let node: FileNode
     let onSelect: (FileNode) -> Void
 
-    @State private var selectedChild: FileNode?
-
     private var topChildren: [FileNode] {
         (node.sortedChildren ?? []).prefix(20).map { $0 }
     }
@@ -95,30 +93,6 @@ struct BarChartView: View {
             }
         }
         .padding()
-
-        // Legend
-        legendView
-    }
-
-    @ViewBuilder
-    private var legendView: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 16) {
-                ForEach(FileCategory.allCases, id: \.self) { category in
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(category.color)
-                            .frame(width: 8, height: 8)
-                        Text(category.displayName)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            .padding(.horizontal)
-        }
-        .frame(height: 30)
-        .background(.ultraThinMaterial)
     }
 }
 

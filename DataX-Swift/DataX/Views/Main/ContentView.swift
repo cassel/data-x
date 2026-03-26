@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
+    @State private var isLegendVisible = false
     private let welcomeTransition = AnyTransition.opacity.combined(with: .scale(scale: 0.98))
     private let scanTransition = AnyTransition.opacity.combined(with: .scale(scale: 1.02))
 
@@ -14,12 +15,18 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: state.scannerViewModel.isScanning)
         .animation(.easeInOut(duration: 0.3), value: state.scannerViewModel.rootNode != nil)
+        .toolbar {
+            scannedToolbar(state: state)
+        }
         .fileImporter(
             isPresented: $state.showFolderPicker,
             allowedContentTypes: [.folder],
             allowsMultipleSelection: false
         ) { result in
             state.handleFolderImport(result)
+        }
+        .onChange(of: state.scannerViewModel.rootNode?.id) { _, _ in
+            isLegendVisible = false
         }
         .alert(
             "Scan Failed",
@@ -65,53 +72,121 @@ struct ContentView: View {
     @ViewBuilder
     private func rightPane(state: AppState) -> some View {
         if !state.scannerViewModel.isScanning,
-           let node = state.scannerViewModel.currentNode {
-            HSplitView {
-                // Visualization
-                VStack(spacing: 0) {
-                    // Visualization header
-                    HStack {
-                        Image(systemName: state.selectedVisualization.icon)
-                            .foregroundColor(.accentColor)
-                        Text(state.selectedVisualization.rawValue)
-                            .font(.headline)
+           let rootNode = state.scannerViewModel.rootNode {
+            let node = state.scannerViewModel.currentNode ?? rootNode
 
-                        Spacer()
+            VStack(spacing: 0) {
+                HStack {
+                    Image(systemName: visibleVisualization(for: state).icon)
+                        .foregroundColor(.accentColor)
+                    Text(visibleVisualization(for: state).rawValue)
+                        .font(.headline)
 
-                        // Breadcrumb for current folder
-                        HStack(spacing: 4) {
-                            Image(systemName: "folder.fill")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text(node.name)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
+                    Spacer()
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "folder.fill")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(node.name)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial)
+
+                Divider()
+
+                mainVisualization(node: node)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .topTrailing) {
+                        if isLegendVisible {
+                            FileTypeLegendOverlay(node: node)
+                                .padding(12)
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(.ultraThinMaterial)
 
-                    Divider()
+                Divider()
 
-                    // Visualization content
-                    mainVisualization(node: node)
-
-                    Divider()
-
-                    // Status bar
-                    StatusBarView()
-                }
-                .frame(minWidth: 400)
-                .background(.regularMaterial)
-
-                // Right Sidebar - Visualizations & Stats
-                SidebarView()
-                    .frame(minWidth: 180, idealWidth: 220, maxWidth: 280)
+                StatusBarView()
             }
+            .frame(minWidth: 400)
+            .background(.regularMaterial)
             .transition(.move(edge: .trailing).combined(with: .opacity))
         }
+    }
+
+    @ToolbarContentBuilder
+    private func scannedToolbar(state: AppState) -> some ToolbarContent {
+        if !state.scannerViewModel.isScanning,
+           state.scannerViewModel.rootNode != nil {
+            ToolbarItemGroup(placement: .automatic) {
+                Button {
+                    state.returnHome()
+                } label: {
+                    Image(systemName: "house")
+                }
+                .help("Back to Home")
+
+                Button {
+                    state.showFolderPicker = true
+                } label: {
+                    Image(systemName: "folder.badge.plus")
+                }
+                .help("Open Folder")
+            }
+
+            ToolbarItem(placement: .principal) {
+                Picker(
+                    "Visualization",
+                    selection: Binding(
+                        get: { visibleVisualization(for: state) },
+                        set: { state.selectedVisualization = $0 }
+                    )
+                ) {
+                    ForEach(AppState.VisualizationType.toolbarOptions) { type in
+                        Label(type.rawValue, systemImage: type.icon)
+                            .tag(type)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(minWidth: 420)
+            }
+
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    isLegendVisible.toggle()
+                } label: {
+                    Image(systemName: isLegendVisible ? "list.bullet.rectangle.portrait.fill" : "list.bullet.rectangle.portrait")
+                }
+                .help(isLegendVisible ? "Hide File Type Legend" : "Show File Type Legend")
+
+                SSHToolbarPopoverButton()
+
+                if let node = state.scannerViewModel.currentNode ?? state.scannerViewModel.rootNode {
+                    Button {
+                        FileOperationsService.revealInFinder(node.path)
+                    } label: {
+                        Image(systemName: "folder.badge.gearshape")
+                    }
+                    .help("Reveal in Finder")
+                }
+
+                Button {
+                    state.refresh()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh")
+            }
+        }
+    }
+
+    private func visibleVisualization(for state: AppState) -> AppState.VisualizationType {
+        state.selectedVisualization == .fileTree ? .treemap : state.selectedVisualization
     }
 
     @ViewBuilder
@@ -447,246 +522,6 @@ struct FileTreeNode: View {
         } label: {
             Label("Move to Trash", systemImage: "trash")
         }
-    }
-}
-
-// MARK: - Sidebar View
-
-struct SidebarView: View {
-    @Environment(AppState.self) private var appState
-
-    var body: some View {
-        @Bindable var state = appState
-
-        VStack(alignment: .leading, spacing: 0) {
-            // App header
-            HStack {
-                Image(systemName: "chart.pie.fill")
-                    .font(.title2)
-                    .foregroundColor(.accentColor)
-                Text("Data-X")
-                    .font(.headline)
-                Spacer()
-
-                if state.scannerViewModel.rootNode != nil {
-                    Button {
-                        state.scannerViewModel.rootNode = nil
-                        state.scannerViewModel.currentNode = nil
-                        state.scannerViewModel.navigationStack = []
-                        state.scannerViewModel.diskInfo = nil
-                        state.lastScannedURL = nil
-                        state.highlightedNode = nil
-                    } label: {
-                        Image(systemName: "house")
-                    }
-                    .buttonStyle(.plain)
-                    .help("Back to Home")
-                }
-
-                Button {
-                    state.showFolderPicker = true
-                } label: {
-                    Image(systemName: "folder.badge.plus")
-                }
-                .buttonStyle(.plain)
-                .help("Open Folder")
-            }
-            .padding(12)
-            .background(.ultraThinMaterial)
-
-            Divider()
-
-            // Visualizations section
-            SidebarSectionHeader(title: "Visualizations")
-
-            ForEach(AppState.VisualizationType.allCases.filter { $0 != .fileTree }) { type in
-                SidebarButton(
-                    icon: type.icon,
-                    label: type.rawValue,
-                    isSelected: state.selectedVisualization == type
-                ) {
-                    state.selectedVisualization = type
-                }
-            }
-
-            Divider()
-                .padding(.vertical, 8)
-
-            // SSH Connections section
-            SSHSidebarSection()
-
-            Divider()
-                .padding(.vertical, 4)
-
-            // File Types section (only show when we have data)
-            if let node = state.scannerViewModel.currentNode {
-                SidebarSectionHeader(title: "File Types")
-
-                ScrollView {
-                    VStack(spacing: 0) {
-                        let stats = calculateCategoryStats(from: node)
-                        ForEach(stats.filter { $0.size > 0 }, id: \.category) { stat in
-                            CategoryStatRow(stat: stat, totalSize: node.size)
-                        }
-                    }
-                }
-            }
-
-            Spacer()
-
-            Divider()
-
-            // Quick actions
-            if state.scannerViewModel.rootNode != nil {
-                HStack(spacing: 12) {
-                    Button {
-                        state.refresh()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .buttonStyle(.plain)
-                    .help("Refresh")
-
-                    if let node = state.scannerViewModel.currentNode {
-                        Button {
-                            FileOperationsService.revealInFinder(node.path)
-                        } label: {
-                            Image(systemName: "folder")
-                        }
-                        .buttonStyle(.plain)
-                        .help("Reveal in Finder")
-                    }
-
-                    Spacer()
-                }
-                .padding(12)
-            }
-        }
-        .background(.regularMaterial)
-    }
-
-    private func calculateCategoryStats(from node: FileNode) -> [CategoryStat] {
-        var categorySizes: [FileCategory: UInt64] = [:]
-        var categoryCounts: [FileCategory: Int] = [:]
-
-        func traverse(_ n: FileNode) {
-            if n.isDirectory {
-                n.children?.forEach { traverse($0) }
-            } else {
-                let cat = n.category
-                categorySizes[cat, default: 0] += n.size
-                categoryCounts[cat, default: 0] += 1
-            }
-        }
-
-        traverse(node)
-
-        return FileCategory.allCases.map { cat in
-            CategoryStat(
-                category: cat,
-                size: categorySizes[cat] ?? 0,
-                count: categoryCounts[cat] ?? 0
-            )
-        }.sorted { $0.size > $1.size }
-    }
-}
-
-struct CategoryStat {
-    let category: FileCategory
-    let size: UInt64
-    let count: Int
-}
-
-struct SidebarSectionHeader: View {
-    let title: String
-
-    var body: some View {
-        Text(title)
-            .font(.caption)
-            .fontWeight(.semibold)
-            .foregroundColor(.secondary)
-            .textCase(.uppercase)
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-            .padding(.bottom, 6)
-    }
-}
-
-struct SidebarButton: View {
-    let icon: String
-    let label: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 13))
-                    .frame(width: 18)
-                    .foregroundColor(isSelected ? .accentColor : .secondary)
-
-                Text(label)
-                    .font(.system(size: 12))
-                    .foregroundColor(isSelected ? .primary : .secondary)
-
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
-            .cornerRadius(6)
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 6)
-    }
-}
-
-struct CategoryStatRow: View {
-    let stat: CategoryStat
-    let totalSize: UInt64
-
-    private var percentage: Double {
-        guard totalSize > 0 else { return 0 }
-        return Double(stat.size) / Double(totalSize)
-    }
-
-    var body: some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 6) {
-                // Color indicator
-                Circle()
-                    .fill(stat.category.color)
-                    .frame(width: 8, height: 8)
-
-                // Category name
-                Text(stat.category.displayName)
-                    .font(.system(size: 11))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-
-                Spacer()
-
-                // Size
-                Text(SizeFormatter.format(stat.size))
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.secondary)
-            }
-
-            // Progress bar
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.secondary.opacity(0.2))
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(stat.category.color)
-                        .frame(width: geo.size.width * percentage)
-                }
-            }
-            .frame(height: 3)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
     }
 }
 

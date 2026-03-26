@@ -1,143 +1,156 @@
 import SwiftUI
 
-struct SSHSidebarSection: View {
+struct SSHConnectionsList: View {
     @Environment(AppState.self) private var appState
+    let dismissPopover: () -> Void
 
     var body: some View {
         @Bindable var ssh = appState.sshViewModel
 
         VStack(alignment: .leading, spacing: 0) {
-            // Section header
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    ssh.isExpanded.toggle()
+            HStack {
+                Label("SSH Connections", systemImage: "network")
+                    .font(.headline)
+
+                Spacer()
+
+                Button {
+                    dismissPopover()
+                    ssh.addNewConnection()
+                } label: {
+                    Label("Add Server", systemImage: "plus")
                 }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .rotationEffect(.degrees(ssh.isExpanded ? 90 : 0))
-
-                    Image(systemName: "network")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
-                    Text("SSH Connections")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.secondary)
-                        .textCase(.uppercase)
-
-                    Spacer()
-
-                    // Add button
-                    Button {
-                        ssh.addNewConnection()
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 14))
-                            .foregroundColor(.accentColor)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Add SSH Connection")
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-            .buttonStyle(.plain)
+            .padding(.bottom, 12)
 
-            // Connection list
-            if ssh.isExpanded {
-                if ssh.connections.isEmpty {
-                    emptyState
-                } else {
-                    ForEach(ssh.connections) { connection in
-                        connectionRow(connection)
+            if ssh.connections.isEmpty {
+                emptyState
+            } else {
+                ScrollView {
+                    VStack(spacing: 10) {
+                        ForEach(ssh.connections) { connection in
+                            connectionRow(connection)
+                        }
                     }
+                    .padding(.vertical, 2)
                 }
-            }
-        }
-        .sheet(isPresented: $ssh.showConnectionModal) {
-            SSHConnectionModal(existing: ssh.editingConnection) { conn, password in
-                ssh.saveConnection(conn, password: password)
+                .frame(maxHeight: 320)
             }
         }
     }
-
-    // MARK: - Empty State
 
     @ViewBuilder
     private var emptyState: some View {
-        VStack(spacing: 6) {
-            Text("No connections")
-                .font(.caption)
+        VStack(spacing: 10) {
+            Text("No saved connections")
+                .font(.subheadline)
                 .foregroundColor(.secondary)
 
             Button {
+                dismissPopover()
                 appState.sshViewModel.addNewConnection()
             } label: {
                 Label("Add Server", systemImage: "plus")
-                    .font(.caption)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.borderedProminent)
             .controlSize(.small)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
+        .padding(.vertical, 20)
     }
-
-    // MARK: - Connection Row
 
     @ViewBuilder
     private func connectionRow(_ connection: SSHConnection) -> some View {
         let isConnecting = appState.sshViewModel.connectingId == connection.id
         let isTesting = appState.sshViewModel.testingConnectionId == connection.id
 
-        HStack(spacing: 8) {
-            // Status indicator
-            Circle()
-                .fill(isConnecting ? Color.orange : Color.secondary.opacity(0.3))
-                .frame(width: 6, height: 6)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(isConnecting ? Color.orange : Color.secondary.opacity(0.3))
+                    .frame(width: 8, height: 8)
 
-            // Connection info
-            VStack(alignment: .leading, spacing: 1) {
-                Text(connection.name)
-                    .font(.system(size: 12))
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(connection.name)
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
 
-                Text("\(connection.username)@\(connection.host)")
-                    .font(.system(size: 10))
+                    Text("\(connection.username)@\(connection.host)")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Image(systemName: connection.authMethod.icon)
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
-                    .lineLimit(1)
             }
 
-            Spacer()
+            HStack(spacing: 6) {
+                Button {
+                    dismissPopover()
+                    appState.sshViewModel.connect(connection, scannerVM: appState.scannerViewModel)
+                } label: {
+                    if isConnecting {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 16, height: 16)
+                    } else {
+                        Label("Connect", systemImage: "play.fill")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(appState.sshViewModel.isConnecting && !isConnecting)
 
-            // Auth method icon
-            Image(systemName: connection.authMethod.icon)
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
+                Button {
+                    appState.sshViewModel.testConnection(connection)
+                } label: {
+                    if isTesting {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 16, height: 16)
+                    } else {
+                        Label("Test", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
 
-            // Activity indicator
-            if isConnecting || isTesting {
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(width: 12, height: 12)
+                Spacer(minLength: 0)
+
+                Button {
+                    dismissPopover()
+                    appState.sshViewModel.editConnection(connection)
+                } label: {
+                    Image(systemName: "pencil")
+                }
+                .buttonStyle(.borderless)
+                .help("Edit Connection")
+
+                Button(role: .destructive) {
+                    appState.sshViewModel.deleteConnection(connection.id)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Delete Connection")
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Color.clear)
-        .contentShape(Rectangle())
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture(count: 2) {
+            dismissPopover()
             appState.sshViewModel.connect(connection, scannerVM: appState.scannerViewModel)
-        }
-        .onTapGesture(count: 1) {
-            // Single tap does nothing for now, keeps double-tap working
         }
         .contextMenu {
             Button {
+                dismissPopover()
                 appState.sshViewModel.connect(connection, scannerVM: appState.scannerViewModel)
             } label: {
                 Label("Connect & Scan", systemImage: "play.fill")
@@ -152,6 +165,7 @@ struct SSHSidebarSection: View {
             Divider()
 
             Button {
+                dismissPopover()
                 appState.sshViewModel.editConnection(connection)
             } label: {
                 Label("Edit", systemImage: "pencil")

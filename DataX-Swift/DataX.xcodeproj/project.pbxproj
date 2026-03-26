@@ -8,9 +8,11 @@
 
 /* Begin PBXBuildFile section */
 		04E343F193BBCDA592094A6B /* FileOperationsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36B3D10486BE8FD48BEBED11 /* FileOperationsService.swift */; };
+		0F1A2B3C4D5E6F708192A3B4 /* FileTypeLegendOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F3A4B5C6D7E8F901A2B3C4D /* FileTypeLegendOverlay.swift */; };
 		13899A7093E8F6E52DE3BC95 /* FileNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D1C9374C17D1CECE12A62D8 /* FileNode.swift */; };
 		1A4F3542ACF5335501758551 /* BarChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E693237A328E7CEEC27AA4A5 /* BarChartView.swift */; };
 		1E1B0A9034E4B89F43BB2743 /* SSHService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0800A78DED4E215E53D62A0E /* SSHService.swift */; };
+		1F2A3B4C5D6E7F8091A2B3C4 /* SSHToolbarPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F4A5B6C7D8E9F001A2B3C4D /* SSHToolbarPopover.swift */; };
 		25BDFB41A51D3B6C3C227BBB /* SSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51F9F4AEEB598CA74D43B5EA /* SSHConnection.swift */; };
 		2DAC706BBB67A62B7389958D /* SunburstView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84ECCFB4499E7CC306F81347 /* SunburstView.swift */; };
 		2FB4C9F6CDF876C8425285EF /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB3A1D91F8141053EC272B4D /* WelcomeView.swift */; };
@@ -53,7 +55,9 @@
 		24355B02DF6D93F7FE8E5D93 /* CirclePackingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CirclePackingView.swift; sourceTree = "<group>"; };
 		25F6DD044EA4929736EF68F9 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		2C25ABF65EFC9AAE076DA6BD /* ScanProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanProgress.swift; sourceTree = "<group>"; };
+		2F3A4B5C6D7E8F901A2B3C4D /* FileTypeLegendOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTypeLegendOverlay.swift; sourceTree = "<group>"; };
 		36747BF62C4E860F714CF69F /* SSHSidebarSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHSidebarSection.swift; sourceTree = "<group>"; };
+		3F4A5B6C7D8E9F001A2B3C4D /* SSHToolbarPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHToolbarPopover.swift; sourceTree = "<group>"; };
 		36B3D10486BE8FD48BEBED11 /* FileOperationsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileOperationsService.swift; sourceTree = "<group>"; };
 		3D1C9374C17D1CECE12A62D8 /* FileNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileNode.swift; sourceTree = "<group>"; };
 		42F65EE890E79E0D42024F00 /* SSHViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHViewModel.swift; sourceTree = "<group>"; };
@@ -149,6 +153,15 @@
 			path = Visualizations;
 			sourceTree = "<group>";
 		};
+		4F5A6B7C8D9E0F112A3B4C5D /* Toolbar */ = {
+			isa = PBXGroup;
+			children = (
+				2F3A4B5C6D7E8F901A2B3C4D /* FileTypeLegendOverlay.swift */,
+				3F4A5B6C7D8E9F001A2B3C4D /* SSHToolbarPopover.swift */,
+			);
+			path = Toolbar;
+			sourceTree = "<group>";
+		};
 		5AF0D8279C8F5F7F18A6A9F6 /* FileTree */ = {
 			isa = PBXGroup;
 			children = (
@@ -223,6 +236,7 @@
 				5AF0D8279C8F5F7F18A6A9F6 /* FileTree */,
 				A04FE1BD86AFD5D438C81120 /* Main */,
 				C58B0FC4D9623EEE530C1C48 /* SSH */,
+				4F5A6B7C8D9E0F112A3B4C5D /* Toolbar */,
 				45A3D7571780E9C965118548 /* Visualizations */,
 			);
 			path = Views;
@@ -348,6 +362,7 @@
 				04E343F193BBCDA592094A6B /* FileOperationsService.swift in Sources */,
 				5BFEA9348B8770394C696729 /* FileTreeView.swift in Sources */,
 				4A2AA4815B97D1C26A5B8B9A /* FilterViewModel.swift in Sources */,
+				0F1A2B3C4D5E6F708192A3B4 /* FileTypeLegendOverlay.swift in Sources */,
 				3236E5427A2D48D01DEEB6DB /* HeaderView.swift in Sources */,
 				CDF4FEF47CF1C9ED466745B4 /* IcicleView.swift in Sources */,
 				25BDFB41A51D3B6C3C227BBB /* SSHConnection.swift in Sources */,
@@ -356,6 +371,7 @@
 				4334CC7BB658C9672BAE5B57 /* SSHKeyManager.swift in Sources */,
 				1E1B0A9034E4B89F43BB2743 /* SSHService.swift in Sources */,
 				B827BB58CCF0A3722A9B5C13 /* SSHSidebarSection.swift in Sources */,
+				1F2A3B4C5D6E7F8091A2B3C4 /* SSHToolbarPopover.swift in Sources */,
 				B79C43F4CDB36E562C44C555 /* SSHViewModel.swift in Sources */,
 				82D821DEB9FD0C7EF97D9436 /* ScanProgress.swift in Sources */,
 				C8F4CFB96A7CA8AE7D9148A4 /* ScannerService.swift in Sources */,

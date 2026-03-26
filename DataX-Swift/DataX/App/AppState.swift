@@ -41,6 +41,10 @@ final class AppState {
 
         var id: String { rawValue }
 
+        static var toolbarOptions: [Self] {
+            [.treemap, .sunburst, .icicle, .barChart, .circlePacking]
+        }
+
         var icon: String {
             switch self {
             case .treemap: return "square.grid.2x2"
@@ -56,6 +60,15 @@ final class AppState {
     func refresh() {
         guard let url = lastScannedURL else { return }
         scannerViewModel.scan(directory: url)
+    }
+
+    func returnHome() {
+        scannerViewModel.rootNode = nil
+        scannerViewModel.currentNode = nil
+        scannerViewModel.navigationStack = []
+        scannerViewModel.diskInfo = nil
+        lastScannedURL = nil
+        highlightedNode = nil
     }
 
     @discardableResult
