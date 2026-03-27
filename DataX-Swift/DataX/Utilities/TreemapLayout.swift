@@ -15,6 +15,7 @@ struct TreemapRect: Identifiable {
     let parentID: UUID?
     let parentName: String
     let parentSize: UInt64
+    let labelLayout: TreemapLabelLayout?
 
     init(
         id: UUID,
@@ -27,7 +28,8 @@ struct TreemapRect: Identifiable {
         color: Color,
         parentID: UUID? = nil,
         parentName: String? = nil,
-        parentSize: UInt64? = nil
+        parentSize: UInt64? = nil,
+        labelLayout: TreemapLabelLayout?? = nil
     ) {
         self.id = id
         self.x = x
@@ -40,6 +42,19 @@ struct TreemapRect: Identifiable {
         self.parentID = parentID
         self.parentName = parentName ?? node.name
         self.parentSize = parentSize ?? node.size
+
+        // Pre-compute label layout (replaces computed property)
+        if let override = labelLayout {
+            self.labelLayout = override
+        } else {
+            let padding: CGFloat = depth == 0 ? 1.0 : 0.5
+            let displayRect = CGRect(x: x, y: y, width: width, height: height)
+                .insetBy(dx: padding, dy: padding)
+            self.labelLayout = TreemapLabelPolicy.makeLayout(
+                name: node.name, sizeText: node.formattedSize,
+                in: displayRect, depth: depth
+            )
+        }
     }
 
     var cgRect: CGRect {
@@ -60,6 +75,8 @@ struct TreemapRect: Identifiable {
     }
 
     func inset(by amount: Double) -> TreemapRect {
+        // labelLayout intentionally nil — inset rects are only used for
+        // child bounds calculation, .cgRect is the only property accessed
         TreemapRect(
             id: id,
             x: x + amount,
@@ -71,7 +88,8 @@ struct TreemapRect: Identifiable {
             color: color,
             parentID: parentID,
             parentName: parentName,
-            parentSize: parentSize
+            parentSize: parentSize,
+            labelLayout: .some(nil)
         )
     }
 }

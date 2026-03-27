@@ -822,13 +822,4 @@ extension TreemapRect {
     var shouldShowTopLevelLabel: Bool {
         labelLayout != nil
     }
-
-    var labelLayout: TreemapLabelLayout? {
-        TreemapLabelPolicy.makeLayout(
-            name: node.name,
-            sizeText: node.formattedSize,
-            in: displayRect,
-            depth: depth
-        )
-    }
 }
