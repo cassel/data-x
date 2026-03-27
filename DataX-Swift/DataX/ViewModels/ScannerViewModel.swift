@@ -299,7 +299,7 @@ final class ScannerViewModel {
     var duplicateReportState: DuplicateReportState = .idle
     var pendingTrashRequest: TrashConfirmationRequest?
     var searchQuery = ""
-    var searchResults: [FileNode] = []
+    @ObservationIgnored var searchResults: [FileNode] = []
     var treeMutationRevision = 0
 
     // MARK: - Private
@@ -926,8 +926,8 @@ final class ScannerViewModel {
     }
 
     private func resetSearch() {
-        searchQuery = ""
-        searchResults = []
+        if !searchQuery.isEmpty { searchQuery = "" }
+        if !searchResults.isEmpty { searchResults = [] }
     }
 
     private func resetInsightRankings() {
@@ -936,9 +936,10 @@ final class ScannerViewModel {
 
     private func anchorNavigationToRoot() {
         guard isIncrementalScanInProgress, let rootNode else { return }
-
-        currentNode = rootNode
-        navigationStack = [rootNode]
+        if currentNode !== rootNode { currentNode = rootNode }
+        if navigationStack.count != 1 || navigationStack.first !== rootNode {
+            navigationStack = [rootNode]
+        }
         resetSearch()
     }
 
