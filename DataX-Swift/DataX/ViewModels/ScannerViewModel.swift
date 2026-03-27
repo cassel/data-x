@@ -768,7 +768,7 @@ final class ScannerViewModel {
             children.append(makeNode(from: subtree))
         }
 
-        parent.children = children.sorted { $0.size > $1.size }
+        parent.children = children
         rollUpAggregateMetrics(startingAt: parent)
         anchorNavigationToRoot()
         let now = Date()
@@ -783,6 +783,7 @@ final class ScannerViewModel {
             self.progress = progress
         }
 
+        root.sortChildrenBySize()
         rootNode = root
         currentNode = root
         navigationStack = [root]
@@ -1192,9 +1193,9 @@ final class ScannerViewModel {
     private func rollUpAggregateMetrics(startingAt node: FileNode) {
         guard node.isDirectory else { return }
 
-        node.children = node.sortedChildren
-        node.size = (node.children ?? []).reduce(0) { $0 + $1.size }
-        node.fileCount = (node.children ?? []).reduce(0) { $0 + $1.fileCount }
+        let kids = node.children ?? []
+        node.size = kids.reduce(0) { $0 + $1.size }
+        node.fileCount = kids.reduce(0) { $0 + $1.fileCount }
 
         if let parent = findParent(of: node, in: rootNode) {
             rollUpAggregateMetrics(startingAt: parent)
