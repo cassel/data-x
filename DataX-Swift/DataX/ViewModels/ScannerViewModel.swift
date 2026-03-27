@@ -316,6 +316,8 @@ final class ScannerViewModel {
     @ObservationIgnored private var modelContext: ModelContext?
     @ObservationIgnored private var growthAlertDismissTask: Task<Void, Never>?
     @ObservationIgnored private var lastLayoutRevisionTime = Date.distantPast
+    @ObservationIgnored private var lastProgressUIUpdateTime = Date.distantPast
+    @ObservationIgnored private var latestScanProgress: ScanProgress?
 
     init(
         duplicateDetector: any DuplicateDetecting = DuplicateDetector(),
@@ -373,6 +375,8 @@ final class ScannerViewModel {
         activeScanSessionID = sessionID
         isScanning = true
         isIncrementalScanInProgress = true
+        lastProgressUIUpdateTime = .distantPast
+        latestScanProgress = nil
         clearError()
         progress = ScanProgress(
             filesScanned: 0,
@@ -720,7 +724,12 @@ final class ScannerViewModel {
 
         switch event {
         case .progress(let progress):
-            self.progress = progress
+            latestScanProgress = progress
+            let now = Date()
+            if now.timeIntervalSince(lastProgressUIUpdateTime) >= 0.25 {
+                lastProgressUIUpdateTime = now
+                self.progress = progress
+            }
         case .partialTree(let subtree):
             mergePartialTree(subtree)
         case .complete(let finalTree):
@@ -794,6 +803,7 @@ final class ScannerViewModel {
         refreshInsightRankings()
         invalidateDuplicateReport()
         lastLayoutRevisionTime = .distantPast
+        lastProgressUIUpdateTime = .distantPast
         treeMutationRevision += 1
 
         persistCompletedScan(root: root, progress: self.progress)
@@ -840,6 +850,11 @@ final class ScannerViewModel {
             rootNode = makeNode(from: result)
         }
 
+        if let latestScanProgress {
+            self.progress = latestScanProgress
+        }
+        latestScanProgress = nil
+
         if let rootNode {
             handleCompletedScan(rootNode)
         }
@@ -854,7 +869,9 @@ final class ScannerViewModel {
         isScanning = false
         isIncrementalScanInProgress = false
         progress = nil
+        latestScanProgress = nil
         lastLayoutRevisionTime = .distantPast
+        lastProgressUIUpdateTime = .distantPast
         clearVisibleTree(resetIdentityState: true)
         finishLocalScan(sessionID: sessionID)
     }
