@@ -115,6 +115,24 @@ final class ScannerServiceTests: XCTestCase {
         XCTAssertEqual(converted.children?.first?.fileCount, 2)
     }
 
+    func testBoundedBufferStillDeliversCompleteEvent() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        // Create a large fixture to verify .complete delivery under bounded buffer policy
+        try makeLargeFixture(at: directory, directoryCount: 10, filesPerDirectory: 200)
+
+        let scanner = ScannerService()
+        let events = await scanner.scan(directory: directory)
+        let collectedEvents = await collectEvents(from: events)
+
+        let completeEvents = collectedEvents.compactMap(\.completeTree)
+        XCTAssertEqual(completeEvents.count, 1, ".complete event must always be delivered")
+
+        let root = try XCTUnwrap(completeEvents.first)
+        XCTAssertEqual(root.fileCount, 2000, "All files must be in the final tree")
+    }
+
     private func collectEvents(from stream: AsyncStream<ScanEvent>) async -> [ScanEvent] {
         var events: [ScanEvent] = []
         for await event in stream {

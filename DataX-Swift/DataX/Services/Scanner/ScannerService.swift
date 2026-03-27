@@ -4,6 +4,7 @@ actor ScannerService {
     private static let progressFileInterval = 100
     private static let progressUpdateInterval: TimeInterval = 0.1
     private static let traversalYieldInterval = 128
+    private static let streamBufferSize = 100
     private static let resourceKeys: Set<URLResourceKey> = [
         .isDirectoryKey,
         .isSymbolicLinkKey,
@@ -32,7 +33,7 @@ actor ScannerService {
         let standardizedDirectory = directory.standardizedFileURL
         let (stream, continuation) = AsyncStream.makeStream(
             of: ScanEvent.self,
-            bufferingPolicy: .unbounded
+            bufferingPolicy: .bufferingNewest(Self.streamBufferSize)
         )
 
         activeScanID = scanID
@@ -110,6 +111,8 @@ actor ScannerService {
                 .progress(makeProgress(currentPath: directory.path, isComplete: true)),
                 continuation: continuation
             )
+            // .complete is the last event emitted — .bufferingNewest drops oldest,
+            // so the newest event is never dropped even when the buffer is full.
             emit(.complete(root), continuation: continuation)
         } catch is CancellationError {
             return
