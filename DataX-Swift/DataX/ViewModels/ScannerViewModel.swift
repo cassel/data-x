@@ -315,6 +315,7 @@ final class ScannerViewModel {
     @ObservationIgnored private var stableNodeIDsByPath: [String: UUID] = [:]
     @ObservationIgnored private var modelContext: ModelContext?
     @ObservationIgnored private var growthAlertDismissTask: Task<Void, Never>?
+    @ObservationIgnored private var lastLayoutRevisionTime = Date.distantPast
 
     init(
         duplicateDetector: any DuplicateDetecting = DuplicateDetector(),
@@ -770,7 +771,11 @@ final class ScannerViewModel {
         parent.children = children.sorted { $0.size > $1.size }
         rollUpAggregateMetrics(startingAt: parent)
         anchorNavigationToRoot()
-        treeMutationRevision += 1
+        let now = Date()
+        if now.timeIntervalSince(lastLayoutRevisionTime) >= 0.5 {
+            lastLayoutRevisionTime = now
+            treeMutationRevision += 1
+        }
     }
 
     func handleCompletedScan(_ root: FileNode, progress: ScanProgress? = nil) {
@@ -787,6 +792,7 @@ final class ScannerViewModel {
         clearError()
         refreshInsightRankings()
         invalidateDuplicateReport()
+        lastLayoutRevisionTime = .distantPast
         treeMutationRevision += 1
 
         persistCompletedScan(root: root, progress: self.progress)
@@ -847,6 +853,7 @@ final class ScannerViewModel {
         isScanning = false
         isIncrementalScanInProgress = false
         progress = nil
+        lastLayoutRevisionTime = .distantPast
         clearVisibleTree(resetIdentityState: true)
         finishLocalScan(sessionID: sessionID)
     }
