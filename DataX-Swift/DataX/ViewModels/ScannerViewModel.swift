@@ -314,7 +314,7 @@ final class ScannerViewModel {
     @ObservationIgnored private var scanTask: Task<Void, Never>?
     @ObservationIgnored private var fileTreeDatabase: FileTreeDatabase?
     @ObservationIgnored private var lastScanID: UUID?
-    @ObservationIgnored private var virtualTreeProvider: VirtualTreeProvider?
+    @ObservationIgnored private(set) var virtualTreeProvider: VirtualTreeProvider?
     @ObservationIgnored private let duplicateDetector: any DuplicateDetecting
     @ObservationIgnored private let fileOperations: FileOperationsClient
     @ObservationIgnored private var duplicateScanTask: Task<Void, Never>?

@@ -497,7 +497,8 @@ struct ContentView: View {
                 onSelect: { navigate(to: $0) },
                 layoutRevision: treeMutationRevision,
                 incrementalScanInProgress: appState.scannerViewModel.isIncrementalScanInProgress,
-                onMoveToTrash: requestMoveToTrash
+                onMoveToTrash: requestMoveToTrash,
+                virtualTreeProvider: appState.scannerViewModel.virtualTreeProvider
             )
         case .sunburst:
             SunburstView(node: node) { navigate(to: $0) }

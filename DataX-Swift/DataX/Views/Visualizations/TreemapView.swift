@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import os
 
 struct TreemapView: View {
     let node: FileNode
@@ -8,6 +9,7 @@ struct TreemapView: View {
     let layoutRevision: Int
     let incrementalScanInProgress: Bool
     let onMoveToTrash: (FileNode) -> Void
+    var virtualTreeProvider: VirtualTreeProvider? = nil
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @AccessibilityFocusState private var accessibilityFocusedRectID: UUID?
@@ -24,10 +26,12 @@ struct TreemapView: View {
     @State private var layoutAnimation: TreemapLayoutAnimation?
     @State private var lastViewSize: CGSize = .zero
     @State private var zoomState = VisualizationZoomState()
+    @State private var prefetchTask: Task<Void, Never>?
     @GestureState private var zoomGesture = VisualizationZoomGestureState()
 
     private let maxDepth = 6
     private let throttleInterval: TimeInterval = 0.016 // ~60fps
+    private static let logger = Logger(subsystem: "com.datax", category: "TreemapView")
     private let labelShadowColor = Color.black.opacity(0.35)
     private let labelShadowRadius: CGFloat = 1.5
     private let labelShadowYOffset: CGFloat = 1
@@ -197,6 +201,17 @@ struct TreemapView: View {
             .onChange(of: zoomState) { _, _ in
                 refreshHoveredNode(in: geometry.size)
             }
+            .onChange(of: hoveredNode?.id) { _, _ in
+                prefetchTask?.cancel()
+                guard let hovered = hoveredNode,
+                      hovered.isDirectory,
+                      hovered.children == nil,
+                      let provider = virtualTreeProvider else { return }
+                let path = hovered.path.path
+                prefetchTask = Task.detached(priority: .utility) {
+                    try? provider.prefetchChildren(of: path)
+                }
+            }
             .simultaneousGesture(magnifyGesture)
         }
     }
@@ -254,6 +269,16 @@ struct TreemapView: View {
         guard deletionAnimation == nil else { return }
         guard size.width > 0 && size.height > 0 else { return }
         lastViewSize = size
+
+        // Pre-layout depth guarantee: ensures nodes are materialized to maxDepth before layout.
+        // Also compensates for shallow cache hits left by hover prefetch (see prefetchChildren).
+        if let provider = virtualTreeProvider {
+            do {
+                try provider.ensureDepth(for: node, depth: maxDepth)
+            } catch {
+                Self.logger.warning("Pre-layout ensureDepth failed: \(error.localizedDescription)")
+            }
+        }
 
         let newRects = layoutRects(for: node, size: size)
         let newHitTestCache = makeHitTestCache(rects: newRects, size: size)

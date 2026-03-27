@@ -51,6 +51,11 @@
 		E99459F832CF805C7E668C4F /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B9325570E8663957C34F53 /* AppState.swift */; };
 		EF5DB5A204782FD366529960 /* TrendSparkline.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0B151F165B59A691EF390D6 /* TrendSparkline.swift */; };
 		F11F6DD14B15CEB143423AB4 /* DuplicateDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5231515C43CA25E8FA38F29E /* DuplicateDetector.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F5 /* FileTreeDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F4 /* FileTreeDatabase.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F3 /* LazyFileNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* LazyFileNode.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1FB /* LRUCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1FA /* LRUCache.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F7 /* ScanDatabaseWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F6 /* ScanDatabaseWriter.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F9 /* VirtualTreeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F8 /* VirtualTreeProvider.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -101,12 +106,18 @@
 		F0B151F165B59A691EF390D6 /* TrendSparkline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrendSparkline.swift; sourceTree = "<group>"; };
 		F569FD15F78F91136725D07A /* FinderServicesProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinderServicesProvider.swift; sourceTree = "<group>"; };
 		FA83C573D3FA33EA8E13213D /* HeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeaderView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1F4 /* FileTreeDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeDatabase.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* LazyFileNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LazyFileNode.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1FA /* LRUCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LRUCache.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1F6 /* ScanDatabaseWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanDatabaseWriter.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1F8 /* VirtualTreeProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualTreeProvider.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
 		0DE22D04B1E86FB0C5D77728 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				A1B2C3D4E5F6A7B8C9D0E1FC /* Database */,
 				26844159918776DDC1F18B54 /* Duplicates */,
 				72E869828EAC25086C0C855F /* FileOperations */,
 				A3F0EA4FFB1D15970E007922 /* Scanner */,
@@ -114,6 +125,16 @@
 				BBAF7D207FD4F8AD136BC000 /* System */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F6A7B8C9D0E1FC /* Database */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F6A7B8C9D0E1F4 /* FileTreeDatabase.swift */,
+				A1B2C3D4E5F6A7B8C9D0E1F6 /* ScanDatabaseWriter.swift */,
+				A1B2C3D4E5F6A7B8C9D0E1F8 /* VirtualTreeProvider.swift */,
+			);
+			path = Database;
 			sourceTree = "<group>";
 		};
 		1601477B5E4E8C7F0B07673E /* SSH */ = {
@@ -158,6 +179,7 @@
 				B46F587C76B467E3E39FB989 /* DiskInfo.swift */,
 				B9FF7262ECBECD09DD652AA8 /* FileCategory.swift */,
 				3D1C9374C17D1CECE12A62D8 /* FileNode.swift */,
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* LazyFileNode.swift */,
 				C2E8E84DB6140315F3C70431 /* ScanEvent.swift */,
 				2C25ABF65EFC9AAE076DA6BD /* ScanProgress.swift */,
 				DEC2C9691B28F7B7730E1EEE /* ScanRecord.swift */,
@@ -271,6 +293,7 @@
 			isa = PBXGroup;
 			children = (
 				D67061EBA6A3D2C87875DCA5 /* ColorPalette.swift */,
+				A1B2C3D4E5F6A7B8C9D0E1FA /* LRUCache.swift */,
 				EC70483222164363921D74FD /* SizeFormatter.swift */,
 				0230A55006976CBF758670A3 /* TreemapLayout.swift */,
 				5A77A950DBEBF1E9615D5AED /* TreemapSpatialIndex.swift */,
@@ -333,6 +356,7 @@
 			);
 			name = DataX;
 			packageProductDependencies = (
+				D1E2F3A4B5C6D7E8F9A0B1C3 /* GRDB */,
 			);
 			productName = DataX;
 			productReference = 0C0EFB5BC466CB844340C367 /* DataX.app */;
@@ -363,6 +387,9 @@
 			mainGroup = C1FEEA6DF1E16CBAE1E44AEC;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			packageReferences = (
+				D1E2F3A4B5C6D7E8F9A0B1C2 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
+			);
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -399,6 +426,7 @@
 				A7E959C1CF10F7F7838BF920 /* FileCategory.swift in Sources */,
 				13899A7093E8F6E52DE3BC95 /* FileNode.swift in Sources */,
 				04E343F193BBCDA592094A6B /* FileOperationsService.swift in Sources */,
+				A1B2C3D4E5F6A7B8C9D0E1F5 /* FileTreeDatabase.swift in Sources */,
 				5BFEA9348B8770394C696729 /* FileTreeView.swift in Sources */,
 				796DA48F29334C916660C9B9 /* FileTypeLegendOverlay.swift in Sources */,
 				4A2AA4815B97D1C26A5B8B9A /* FilterViewModel.swift in Sources */,
@@ -406,6 +434,8 @@
 				3236E5427A2D48D01DEEB6DB /* HeaderView.swift in Sources */,
 				62B1AE49499EFA5E17ADDAA4 /* HistoryPanel.swift in Sources */,
 				132991F4057314599CC7D4A9 /* InsightsPopover.swift in Sources */,
+				A1B2C3D4E5F6A7B8C9D0E1F3 /* LazyFileNode.swift in Sources */,
+				A1B2C3D4E5F6A7B8C9D0E1FB /* LRUCache.swift in Sources */,
 				70DF49953CB4F1A96C47F894 /* MenuBarView.swift in Sources */,
 				25BDFB41A51D3B6C3C227BBB /* SSHConnection.swift in Sources */,
 				9DEAA80264B7F320DA27530C /* SSHConnectionModal.swift in Sources */,
@@ -415,6 +445,7 @@
 				B827BB58CCF0A3722A9B5C13 /* SSHSidebarSection.swift in Sources */,
 				D9BC2C93EBB17F67CFFC982D /* SSHToolbarPopover.swift in Sources */,
 				B79C43F4CDB36E562C44C555 /* SSHViewModel.swift in Sources */,
+				A1B2C3D4E5F6A7B8C9D0E1F7 /* ScanDatabaseWriter.swift in Sources */,
 				00234D7A7D83148930BAA1F8 /* ScanEvent.swift in Sources */,
 				82D821DEB9FD0C7EF97D9436 /* ScanProgress.swift in Sources */,
 				70957ABB9FCA96906A4748CE /* ScanRecord.swift in Sources */,
@@ -428,6 +459,7 @@
 				24D18AA28ECD2606FFB1EDD2 /* TreemapSpatialIndex.swift in Sources */,
 				3E735714223F773DA4176E7B /* TreemapView.swift in Sources */,
 				EF5DB5A204782FD366529960 /* TrendSparkline.swift in Sources */,
+				A1B2C3D4E5F6A7B8C9D0E1F9 /* VirtualTreeProvider.swift in Sources */,
 				A4AC52C2971AA11298C0B87C /* VisualizationAccessibility.swift in Sources */,
 				2FB4C9F6CDF876C8425285EF /* WelcomeView.swift in Sources */,
 			);
@@ -615,6 +647,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D1E2F3A4B5C6D7E8F9A0B1C2 /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D1E2F3A4B5C6D7E8F9A0B1C3 /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D1E2F3A4B5C6D7E8F9A0B1C2 /* XCRemoteSwiftPackageReference "GRDB.swift" */;
+			productName = GRDB;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 6D772CA9E05BBB9E2D4729EE /* Project object */;
 }
