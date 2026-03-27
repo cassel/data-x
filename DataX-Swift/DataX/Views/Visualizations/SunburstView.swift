@@ -15,6 +15,8 @@ struct SunburstView: View {
     @State private var isDrillNavigating = false
     @State private var zoomState = VisualizationZoomState()
     @GestureState private var zoomGesture = VisualizationZoomGestureState()
+    @State private var cachedArcs: [ArcData] = []
+    @State private var cachedGeometrySize: CGSize = .zero
 
     private let maxDepth = 4
     private let innerRadius: CGFloat = 60
@@ -99,22 +101,27 @@ struct SunburstView: View {
     var body: some View {
         GeometryReader { geometry in
             let center = CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2)
-            let maxRadius = min(geometry.size.width, geometry.size.height) / 2 - 20
-            let arcData = maxRadius > innerRadius ? arcs(for: node, maxRadius: maxRadius) : []
 
             interactiveContent(
-                arcs: arcData,
+                arcs: cachedArcs,
                 center: center,
                 viewSize: geometry.size
             )
+            .onAppear {
+                recomputeArcs(size: geometry.size)
+            }
             .onChange(of: node.id) { _, newNodeID in
+                recomputeArcs(size: cachedGeometrySize)
                 handleNodeChange(newNodeID: newNodeID)
             }
-            .onChange(of: arcData.map(\.id)) { _, _ in
-                syncKeyboardFocus(with: arcData)
+            .onChange(of: geometry.size) { _, newSize in
+                recomputeArcs(size: newSize)
+            }
+            .onChange(of: cachedArcs.map(\.id)) { _, _ in
+                syncKeyboardFocus(with: cachedArcs)
             }
             .onChange(of: accessibilityFocusedArcID) { _, newValue in
-                guard let newValue, arcData.contains(where: { $0.id == newValue }) else {
+                guard let newValue, cachedArcs.contains(where: { $0.id == newValue }) else {
                     keyboardFocusedArcID = nil
                     return
                 }
@@ -387,6 +394,15 @@ struct SunburstView: View {
     }
 
     private func arcs(for rootNode: FileNode, maxRadius: CGFloat) -> [ArcData] {
+        Self.computeArcs(for: rootNode, maxRadius: maxRadius, innerRadius: innerRadius, maxDepth: maxDepth)
+    }
+
+    static func computeArcs(
+        for rootNode: FileNode,
+        maxRadius: CGFloat,
+        innerRadius: CGFloat,
+        maxDepth: Int
+    ) -> [ArcData] {
         var result: [ArcData] = []
         let ringWidth = (maxRadius - innerRadius) / CGFloat(maxDepth)
 
@@ -433,6 +449,12 @@ struct SunburstView: View {
 
         processNode(rootNode, startAngle: 0, endAngle: 2 * .pi, depth: 0)
         return result
+    }
+
+    private func recomputeArcs(size: CGSize) {
+        cachedGeometrySize = size
+        let maxRadius = min(size.width, size.height) / 2 - 20
+        cachedArcs = maxRadius > innerRadius ? arcs(for: node, maxRadius: maxRadius) : []
     }
 
     private func drillDepartureAnimation(for plan: SunburstDrillMotionPlan) -> Animation {
