@@ -1031,6 +1031,7 @@ struct FileTreeNode: View {
 
 struct SettingsView: View {
     @AppStorage("treemapDepth") private var treemapDepth = 1
+    @AppStorage("nodeBudgetOverride") private var nodeBudgetOverride: Int = 0
 
     var body: some View {
         Form {
@@ -1039,9 +1040,25 @@ struct SettingsView: View {
                 Text("2 levels").tag(2)
                 Text("3 levels").tag(3)
             }
+
+            Section("Memory") {
+                LabeledContent("System default") {
+                    Text("\(MemoryBudgetManager.defaultBudget().formatted()) nodes")
+                }
+                Stepper(value: $nodeBudgetOverride, in: 0...500_000, step: 10_000) {
+                    if nodeBudgetOverride > 0 {
+                        Text("Override: \(nodeBudgetOverride.formatted()) nodes")
+                    } else {
+                        Text("Using system default")
+                    }
+                }
+                if nodeBudgetOverride > 0 {
+                    Button("Reset to Default") { nodeBudgetOverride = 0 }
+                }
+            }
         }
         .padding()
-        .frame(width: 300, height: 150)
+        .frame(width: 300, height: 250)
     }
 }
 

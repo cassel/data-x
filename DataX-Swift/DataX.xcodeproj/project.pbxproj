@@ -56,6 +56,7 @@
 		A1B2C3D4E5F6A7B8C9D0E1FB /* LRUCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1FA /* LRUCache.swift */; };
 		A1B2C3D4E5F6A7B8C9D0E1F7 /* ScanDatabaseWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F6 /* ScanDatabaseWriter.swift */; };
 		A1B2C3D4E5F6A7B8C9D0E1F9 /* VirtualTreeProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F8 /* VirtualTreeProvider.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1FE /* MemoryBudgetManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1FD /* MemoryBudgetManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -111,6 +112,7 @@
 		A1B2C3D4E5F6A7B8C9D0E1FA /* LRUCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LRUCache.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6A7B8C9D0E1F6 /* ScanDatabaseWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanDatabaseWriter.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6A7B8C9D0E1F8 /* VirtualTreeProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualTreeProvider.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1FD /* MemoryBudgetManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryBudgetManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -131,6 +133,7 @@
 			isa = PBXGroup;
 			children = (
 				A1B2C3D4E5F6A7B8C9D0E1F4 /* FileTreeDatabase.swift */,
+				A1B2C3D4E5F6A7B8C9D0E1FD /* MemoryBudgetManager.swift */,
 				A1B2C3D4E5F6A7B8C9D0E1F6 /* ScanDatabaseWriter.swift */,
 				A1B2C3D4E5F6A7B8C9D0E1F8 /* VirtualTreeProvider.swift */,
 			);
@@ -459,6 +462,7 @@
 				24D18AA28ECD2606FFB1EDD2 /* TreemapSpatialIndex.swift in Sources */,
 				3E735714223F773DA4176E7B /* TreemapView.swift in Sources */,
 				EF5DB5A204782FD366529960 /* TrendSparkline.swift in Sources */,
+				A1B2C3D4E5F6A7B8C9D0E1FE /* MemoryBudgetManager.swift in Sources */,
 				A1B2C3D4E5F6A7B8C9D0E1F9 /* VirtualTreeProvider.swift in Sources */,
 				A4AC52C2971AA11298C0B87C /* VisualizationAccessibility.swift in Sources */,
 				2FB4C9F6CDF876C8425285EF /* WelcomeView.swift in Sources */,

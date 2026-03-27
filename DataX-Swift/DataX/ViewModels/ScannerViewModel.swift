@@ -843,7 +843,7 @@ final class ScannerViewModel {
         root.sortChildrenBySize()
 
         if let db = fileTreeDatabase, let scanID = lastScanID {
-            let provider = VirtualTreeProvider(database: db, scanID: scanID)
+            let provider = VirtualTreeProvider(database: db, scanID: scanID, nodeBudget: MemoryBudgetManager.effectiveBudget())
             virtualTreeProvider = provider
             do {
                 if let dbRoot = try provider.rootNode(maxDepth: 6) {
