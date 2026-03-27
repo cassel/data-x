@@ -4,6 +4,8 @@ actor ScannerService {
     private static let progressFileInterval = 100
     private static let progressUpdateInterval: TimeInterval = 0.1
     private static let traversalYieldInterval = 128
+    private static let adaptiveQoSThreshold = 100_000
+    private static let adaptiveSleepInterval = 5_000
     private static let streamBufferSize = 100
     private static let resourceKeys: Set<URLResourceKey> = [
         .isDirectoryKey,
@@ -264,6 +266,7 @@ actor ScannerService {
                 } else {
                     filesScanned += 1
                     bytesScanned += fileSize
+                    try await maybeAdaptiveThrottle()
                     child = FileNodeData(
                         url: standardizedURL,
                         isDirectory: isDirectory,
@@ -313,6 +316,15 @@ actor ScannerService {
         }
 
         await Task.yield()
+        try throwIfCancelled()
+    }
+
+    private func maybeAdaptiveThrottle() async throws {
+        guard filesScanned >= Self.adaptiveQoSThreshold,
+              filesScanned.isMultiple(of: Self.adaptiveSleepInterval) else {
+            return
+        }
+        try await Task.sleep(for: .milliseconds(1))
         try throwIfCancelled()
     }
 
