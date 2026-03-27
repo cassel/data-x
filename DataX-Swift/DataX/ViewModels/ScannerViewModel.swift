@@ -302,6 +302,12 @@ final class ScannerViewModel {
     @ObservationIgnored var searchResults: [FileNode] = []
     var treeMutationRevision = 0
 
+    private static let largeScanDuplicateThreshold = 500_000
+
+    var isLargeScanForDuplicates: Bool {
+        rootNode?.fileCount ?? 0 > Self.largeScanDuplicateThreshold
+    }
+
     // MARK: - Private
 
     @ObservationIgnored private var scanner = ScannerService()

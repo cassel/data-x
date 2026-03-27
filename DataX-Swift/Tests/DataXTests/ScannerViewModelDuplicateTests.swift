@@ -90,6 +90,27 @@ final class ScannerViewModelDuplicateTests: XCTestCase {
         XCTAssertEqual(viewModel.duplicateReportState, .idle)
     }
 
+    func testIsLargeScanForDuplicatesReturnsFalseWhenNoRootNode() {
+        let viewModel = ScannerViewModel(duplicateDetector: StubDuplicateDetector(reports: []))
+        XCTAssertFalse(viewModel.isLargeScanForDuplicates)
+    }
+
+    func testIsLargeScanForDuplicatesReturnsFalseAtThreshold() {
+        let viewModel = ScannerViewModel(duplicateDetector: StubDuplicateDetector(reports: []))
+        let root = makeDirectory("/root", children: [])
+        root.fileCount = 500_000
+        viewModel.rootNode = root
+        XCTAssertFalse(viewModel.isLargeScanForDuplicates)
+    }
+
+    func testIsLargeScanForDuplicatesReturnsTrueAboveThreshold() {
+        let viewModel = ScannerViewModel(duplicateDetector: StubDuplicateDetector(reports: []))
+        let root = makeDirectory("/root", children: [])
+        root.fileCount = 500_001
+        viewModel.rootNode = root
+        XCTAssertTrue(viewModel.isLargeScanForDuplicates)
+    }
+
     func testCompleteRemoteScanInvalidatesDuplicateReport() {
         let oldRoot = makeDirectory("/root", children: [makeFile("/root/old.bin", size: 2_048)])
         let newRoot = makeDirectory("/new-root", children: [makeFile("/new-root/new.bin", size: 8_192)])

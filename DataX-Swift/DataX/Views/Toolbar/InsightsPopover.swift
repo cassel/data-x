@@ -19,6 +19,7 @@ struct InsightsToolbarPopoverButton: View {
             InsightsPopover(
                 insights: appState.scannerViewModel.insights,
                 duplicateState: appState.scannerViewModel.duplicateReportState,
+                isLargeScan: appState.scannerViewModel.isLargeScanForDuplicates,
                 onSelectNode: { node in
                     appState.selectInsight(node)
                     isPopoverPresented = false
@@ -54,6 +55,7 @@ struct InsightsToolbarPopoverButton: View {
 struct InsightsPopover: View {
     let insights: ScanInsights
     let duplicateState: DuplicateReportState
+    let isLargeScan: Bool
     let onSelectNode: (FileNode) -> Void
     let onRunDuplicateScan: (Bool) -> Void
     let onSelectDuplicatePath: (String) -> Void
@@ -155,6 +157,11 @@ struct InsightsPopover: View {
 
             switch duplicateState {
             case .idle:
+                if isLargeScan {
+                    duplicatePlaceholderRow(
+                        "This scan contains over 500,000 files. Duplicate detection may take a long time — run manually when ready."
+                    )
+                }
                 duplicatePlaceholderRow(
                     "Run an explicit duplicate scan to confirm repeated files from the completed scan tree."
                 )
