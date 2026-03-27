@@ -29,6 +29,13 @@ final class FileNode: Identifiable, Hashable {
         children?.sorted { $0.size > $1.size }
     }
 
+    /// Sorts children in-place by size (descending), recursively.
+    func sortChildrenBySize() {
+        guard isDirectory, let kids = children else { return }
+        children = kids.sorted { $0.size > $1.size }
+        for child in kids { child.sortChildrenBySize() }
+    }
+
     init(
         url: URL,
         isDirectory: Bool,

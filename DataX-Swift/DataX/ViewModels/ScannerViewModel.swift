@@ -1184,10 +1184,9 @@ final class ScannerViewModel {
     private func rollUpAggregateMetrics(startingAt node: FileNode) {
         guard node.isDirectory else { return }
 
-        let sortedChildren = (node.children ?? []).sorted { $0.size > $1.size }
-        node.children = sortedChildren
-        node.size = sortedChildren.reduce(0) { $0 + $1.size }
-        node.fileCount = sortedChildren.reduce(0) { $0 + $1.fileCount }
+        node.children = node.sortedChildren
+        node.size = (node.children ?? []).reduce(0) { $0 + $1.size }
+        node.fileCount = (node.children ?? []).reduce(0) { $0 + $1.fileCount }
 
         if let parent = findParent(of: node, in: rootNode) {
             rollUpAggregateMetrics(startingAt: parent)

@@ -387,7 +387,7 @@ final class SSHService {
             nodeMap[file.path] = node
 
             // Find parent
-            let parentPath = (file.path as NSString).deletingLastPathComponent
+            let parentPath = URL(fileURLWithPath: file.path).deletingLastPathComponent().path
             if let parent = nodeMap[parentPath] {
                 if parent.children == nil {
                     parent.children = []
@@ -400,7 +400,7 @@ final class SSHService {
         calculateSizes(root)
 
         // Sort children by size
-        sortChildren(root)
+        root.sortChildrenBySize()
 
         return root
     }
@@ -412,14 +412,6 @@ final class SSHService {
         }
         node.size = children.reduce(0) { $0 + $1.size }
         node.fileCount = children.reduce(0) { $0 + $1.fileCount }
-    }
-
-    private func sortChildren(_ node: FileNode) {
-        guard node.isDirectory, let children = node.children else { return }
-        node.children = children.sorted { $0.size > $1.size }
-        for child in children {
-            sortChildren(child)
-        }
     }
 }
 
