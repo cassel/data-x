@@ -97,6 +97,7 @@ struct TreemapRect: Identifiable {
 enum TreemapLayout {
     // Cache for dominant colors to avoid recalculating
     private static var colorCache: [UUID: Color] = [:]
+    private static var cacheKey: (rootID: UUID, childCount: Int)?
 
     static func layout(
         node: FileNode,
@@ -105,7 +106,11 @@ enum TreemapLayout {
         maxDepth: Int = 6,
         maxRects: Int = 5000  // Limit total rects
     ) -> [TreemapRect] {
-        colorCache.removeAll()  // Clear cache for new layout
+        let newKey = (rootID: node.id, childCount: node.children?.count ?? 0)
+        if cacheKey?.rootID != newKey.rootID || cacheKey?.childCount != newKey.childCount {
+            colorCache.removeAll()
+        }
+        cacheKey = newKey
         var rects: [TreemapRect] = []
         layoutRecursive(
             node: node,
