@@ -314,6 +314,7 @@ final class ScannerViewModel {
     @ObservationIgnored private var scanTask: Task<Void, Never>?
     @ObservationIgnored private var fileTreeDatabase: FileTreeDatabase?
     @ObservationIgnored private var lastScanID: UUID?
+    @ObservationIgnored private var virtualTreeProvider: VirtualTreeProvider?
     @ObservationIgnored private let duplicateDetector: any DuplicateDetecting
     @ObservationIgnored private let fileOperations: FileOperationsClient
     @ObservationIgnored private var duplicateScanTask: Task<Void, Never>?
@@ -372,6 +373,7 @@ final class ScannerViewModel {
         dismissGrowthAlert()
         advanceTreeSession()
         invalidateDuplicateReport()
+        virtualTreeProvider = nil
 
         let sessionID = UUID()
         let startTime = Date()
@@ -455,6 +457,11 @@ final class ScannerViewModel {
     func navigateTo(_ node: FileNode) {
         guard !isIncrementalScanInProgress, node.isDirectory else { return }
 
+        do {
+            try virtualTreeProvider?.ensureDepth(for: node, depth: 6)
+        } catch {
+            Self.persistenceLogger.error("ensureDepth failed in navigateTo: \(error.localizedDescription)")
+        }
         currentNode = node
         searchQuery = ""
         searchResults = []
@@ -469,6 +476,13 @@ final class ScannerViewModel {
     func navigateBack() {
         guard !isIncrementalScanInProgress, navigationStack.count > 1 else { return }
         navigationStack.removeLast()
+        if let target = navigationStack.last {
+            do {
+                try virtualTreeProvider?.ensureDepth(for: target, depth: 6)
+            } catch {
+                Self.persistenceLogger.error("ensureDepth failed in navigateBack: \(error.localizedDescription)")
+            }
+        }
         currentNode = navigationStack.last
         searchQuery = ""
         searchResults = []
@@ -476,6 +490,11 @@ final class ScannerViewModel {
 
     func navigateToRoot() {
         guard !isIncrementalScanInProgress, let root = rootNode else { return }
+        do {
+            try virtualTreeProvider?.ensureDepth(for: root, depth: 6)
+        } catch {
+            Self.persistenceLogger.error("ensureDepth failed in navigateToRoot: \(error.localizedDescription)")
+        }
         currentNode = root
         navigationStack = [root]
         searchQuery = ""
@@ -485,6 +504,11 @@ final class ScannerViewModel {
     func navigateToBreadcrumb(at index: Int) {
         guard !isIncrementalScanInProgress, index < navigationStack.count else { return }
         let node = navigationStack[index]
+        do {
+            try virtualTreeProvider?.ensureDepth(for: node, depth: 6)
+        } catch {
+            Self.persistenceLogger.error("ensureDepth failed in navigateToBreadcrumb: \(error.localizedDescription)")
+        }
         currentNode = node
         navigationStack = Array(navigationStack.prefix(through: index))
         searchQuery = ""
@@ -817,9 +841,32 @@ final class ScannerViewModel {
         }
 
         root.sortChildrenBySize()
-        rootNode = root
-        currentNode = root
-        navigationStack = [root]
+
+        if let db = fileTreeDatabase, let scanID = lastScanID {
+            let provider = VirtualTreeProvider(database: db, scanID: scanID)
+            virtualTreeProvider = provider
+            do {
+                if let dbRoot = try provider.rootNode(maxDepth: 6) {
+                    rootNode = dbRoot
+                    currentNode = dbRoot
+                    navigationStack = [dbRoot]
+                } else {
+                    rootNode = root
+                    currentNode = root
+                    navigationStack = [root]
+                }
+            } catch {
+                Self.persistenceLogger.error("Failed to load root from VirtualTreeProvider: \(error.localizedDescription)")
+                rootNode = root
+                currentNode = root
+                navigationStack = [root]
+            }
+        } else {
+            rootNode = root
+            currentNode = root
+            navigationStack = [root]
+        }
+
         resetSearch()
         isScanning = false
         isIncrementalScanInProgress = false
@@ -830,7 +877,7 @@ final class ScannerViewModel {
         lastProgressUIUpdateTime = .distantPast
         treeMutationRevision += 1
 
-        persistCompletedScan(root: root, progress: self.progress)
+        persistCompletedScan(root: rootNode ?? root, progress: self.progress)
     }
 
     func makeScanRecord(
