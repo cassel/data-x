@@ -93,6 +93,46 @@ final class SunburstArcCacheTests: XCTestCase {
         XCTAssertLessThan(maxArcDepth, maxDepth)
     }
 
+    func testMaxArcLimitEnforced() {
+        // Build 700 single-child chains, each 3 levels deep: dir → sub-dir → file.
+        // Every arc span ≈ 360°/700 ≈ 0.514° (> 0.5° threshold), so none are culled.
+        // Without the 2000-arc guard, this tree produces 2100 arcs.
+        let chainCount = 700
+        let root = makeDirectory("/root", size: UInt64(chainCount * 1000))
+        var rootChildren: [FileNode] = []
+
+        for i in 0..<chainCount {
+            let dir = makeDirectory("/root/d\(i)", size: 1000)
+            let sub = makeDirectory("/root/d\(i)/s", size: 1000)
+            let file = makeFile("/root/d\(i)/s/f", size: 1000)
+            sub.children = [file]
+            dir.children = [sub]
+            rootChildren.append(dir)
+        }
+
+        root.children = rootChildren
+
+        let arcs = SunburstView.computeArcs(
+            for: root, maxRadius: 500, innerRadius: innerRadius, maxDepth: maxDepth
+        )
+
+        XCTAssertLessThanOrEqual(arcs.count, 2000,
+            "Arc count (\(arcs.count)) should not exceed the 2000 limit")
+        XCTAssertGreaterThan(arcs.count, 1500,
+            "Arc count should be close to 2000, confirming the guard is actually exercised")
+    }
+
+    func testArcLimitDoesNotAffectSmallTrees() {
+        // The known 7-arc tree should still produce exactly 7 arcs (no false truncation)
+        let root = makeTree()
+        let arcs = SunburstView.computeArcs(
+            for: root, maxRadius: 250, innerRadius: innerRadius, maxDepth: maxDepth
+        )
+
+        XCTAssertEqual(arcs.count, 7,
+            "Small tree should produce exactly 7 arcs, not be affected by the 2000 limit")
+    }
+
     // MARK: - Helpers
 
     private func makeTree() -> FileNode {

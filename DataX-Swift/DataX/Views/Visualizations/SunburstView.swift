@@ -407,6 +407,7 @@ struct SunburstView: View {
         let ringWidth = (maxRadius - innerRadius) / CGFloat(maxDepth)
 
         func processNode(_ node: FileNode, startAngle: Double, endAngle: Double, depth: Int) {
+            guard result.count < 2000 else { return }
             guard depth < maxDepth else { return }
             guard let children = node.sortedChildren, !children.isEmpty else { return }
 
@@ -420,6 +421,7 @@ struct SunburstView: View {
                 let childEndAngle = currentAngle + angleSpan
 
                 if angleSpan > 0.5 * .pi / 180 {
+                    guard result.count < 2000 else { return }
                     let arc = ArcData(
                         node: child,
                         startAngle: currentAngle,
