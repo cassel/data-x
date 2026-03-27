@@ -38,7 +38,7 @@ actor ScannerService {
 
         activeScanID = scanID
         activeContinuation = continuation
-        activeScanTask = Task { [standardizedDirectory, maxDepth, includeHidden] in
+        activeScanTask = Task(priority: .utility) { [standardizedDirectory, maxDepth, includeHidden] in
             await self.runScan(
                 id: scanID,
                 directory: standardizedDirectory,
