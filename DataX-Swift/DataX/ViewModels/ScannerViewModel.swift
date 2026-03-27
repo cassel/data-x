@@ -312,6 +312,8 @@ final class ScannerViewModel {
 
     @ObservationIgnored private var scanner = ScannerService()
     @ObservationIgnored private var scanTask: Task<Void, Never>?
+    @ObservationIgnored private var fileTreeDatabase: FileTreeDatabase?
+    @ObservationIgnored private var lastScanID: UUID?
     @ObservationIgnored private let duplicateDetector: any DuplicateDetecting
     @ObservationIgnored private let fileOperations: FileOperationsClient
     @ObservationIgnored private var duplicateScanTask: Task<Void, Never>?
@@ -397,13 +399,29 @@ final class ScannerViewModel {
         diskInfo = try? DiskInfo.forPath(standardizedDirectory)
         prepareIncrementalRoot(for: standardizedDirectory)
 
-        scanTask = Task { [weak self, scanner, standardizedDirectory] in
+        var databaseWriter: ScanDatabaseWriter?
+        let scanID = UUID()
+        if fileTreeDatabase == nil {
+            fileTreeDatabase = try? FileTreeDatabase(path: FileTreeDatabase.defaultPath())
+        }
+        if let db = fileTreeDatabase {
+            let writer = ScanDatabaseWriter(database: db)
+            do {
+                try writer.beginScan(scanID: scanID, rootPath: standardizedDirectory.path)
+                databaseWriter = writer
+                lastScanID = scanID
+            } catch {
+                Self.persistenceLogger.error("Failed to begin scan database write: \(error.localizedDescription)")
+            }
+        }
+
+        scanTask = Task { [weak self, scanner, standardizedDirectory, databaseWriter] in
             guard let self else {
                 await scanner.cancel()
                 return
             }
 
-            let events = await scanner.scan(directory: standardizedDirectory)
+            let events = await scanner.scan(directory: standardizedDirectory, databaseWriter: databaseWriter)
             var didComplete = false
 
             for await event in events {

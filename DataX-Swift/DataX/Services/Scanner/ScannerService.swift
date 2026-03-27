@@ -27,7 +27,8 @@ actor ScannerService {
     func scan(
         directory: URL,
         maxDepth: Int? = nil,
-        includeHidden: Bool = false
+        includeHidden: Bool = false,
+        databaseWriter: ScanDatabaseWriter? = nil
     ) -> AsyncStream<ScanEvent> {
         cancelActiveScanIfNeeded()
         resetState()
@@ -40,12 +41,13 @@ actor ScannerService {
 
         activeScanID = scanID
         activeContinuation = continuation
-        activeScanTask = Task(priority: .utility) { [standardizedDirectory, maxDepth, includeHidden] in
+        activeScanTask = Task(priority: .utility) { [standardizedDirectory, maxDepth, includeHidden, databaseWriter] in
             await self.runScan(
                 id: scanID,
                 directory: standardizedDirectory,
                 maxDepth: maxDepth,
                 includeHidden: includeHidden,
+                databaseWriter: databaseWriter,
                 continuation: continuation
             )
         }
@@ -75,6 +77,7 @@ actor ScannerService {
         directory: URL,
         maxDepth: Int?,
         includeHidden: Bool,
+        databaseWriter: ScanDatabaseWriter?,
         continuation: AsyncStream<ScanEvent>.Continuation
     ) async {
         defer {
@@ -105,6 +108,7 @@ actor ScannerService {
                 includeHidden: includeHidden,
                 modificationDate: nil,
                 directorySize: 0,
+                databaseWriter: databaseWriter,
                 continuation: continuation
             )
 
@@ -116,6 +120,7 @@ actor ScannerService {
             // .complete is the last event emitted — .bufferingNewest drops oldest,
             // so the newest event is never dropped even when the buffer is full.
             emit(.complete(root), continuation: continuation)
+            try? databaseWriter?.finalize(scanID: id)
         } catch is CancellationError {
             return
         } catch {
@@ -188,6 +193,7 @@ actor ScannerService {
         includeHidden: Bool,
         modificationDate: Date?,
         directorySize: UInt64,
+        databaseWriter: ScanDatabaseWriter?,
         continuation: AsyncStream<ScanEvent>.Continuation
     ) async throws -> FileNodeData {
         try throwIfCancelled()
@@ -206,6 +212,16 @@ actor ScannerService {
         }
 
         directoriesScanned += 1
+        if let databaseWriter, let activeScanID {
+            databaseWriter.add(LazyFileNode.fromScanEntry(
+                url: standardizedDirectory,
+                isDirectory: true,
+                isSymlink: false,
+                fileSize: 0,
+                modificationDate: modificationDate,
+                scanID: activeScanID
+            ))
+        }
         emitProgress(
             currentPath: Self.displayName(for: standardizedDirectory),
             progress: continuation
@@ -261,12 +277,23 @@ actor ScannerService {
                         includeHidden: includeHidden,
                         modificationDate: modDate,
                         directorySize: fileSize,
+                        databaseWriter: databaseWriter,
                         continuation: continuation
                     )
                 } else {
                     filesScanned += 1
                     bytesScanned += fileSize
                     try await maybeAdaptiveThrottle()
+                    if let databaseWriter, let activeScanID {
+                        databaseWriter.add(LazyFileNode.fromScanEntry(
+                            url: standardizedURL,
+                            isDirectory: isDirectory,
+                            isSymlink: isSymlink,
+                            fileSize: fileSize,
+                            modificationDate: modDate,
+                            scanID: activeScanID
+                        ))
+                    }
                     child = FileNodeData(
                         url: standardizedURL,
                         isDirectory: isDirectory,

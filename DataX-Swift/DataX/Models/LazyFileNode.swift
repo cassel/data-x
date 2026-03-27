@@ -39,6 +39,34 @@ struct LazyFileNode: Codable, FetchableRecord, PersistableRecord, Identifiable, 
     }
 }
 
+// MARK: - Factory: Scan Entry Conversion
+
+extension LazyFileNode {
+    static func fromScanEntry(
+        url: URL,
+        isDirectory: Bool,
+        isSymlink: Bool,
+        fileSize: UInt64,
+        modificationDate: Date?,
+        scanID: UUID
+    ) -> LazyFileNode {
+        let ext = url.pathExtension.lowercased()
+        return LazyFileNode(
+            path: url.standardizedFileURL.path,
+            name: url.lastPathComponent,
+            size: isDirectory ? 0 : fileSize,
+            isDirectory: isDirectory,
+            fileCount: isDirectory ? 0 : 1,
+            parentPath: url.deletingLastPathComponent().standardizedFileURL.path,
+            modificationDate: modificationDate,
+            fileExtension: isDirectory ? nil : (ext.isEmpty ? nil : ext),
+            isSymlink: isSymlink,
+            isHidden: url.lastPathComponent.hasPrefix("."),
+            scanID: scanID
+        )
+    }
+}
+
 // MARK: - Adapter: LazyFileNode → FileNode
 
 extension LazyFileNode {

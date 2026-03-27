@@ -81,6 +81,12 @@ final class FileTreeDatabase: @unchecked Sendable {
         }
     }
 
+    func deleteAllNodes() throws {
+        _ = try dbWriter.write { db in
+            try LazyFileNode.deleteAll(db)
+        }
+    }
+
     func fetchChildren(
         of parentPath: String,
         limit: Int = 1000,
@@ -123,6 +129,35 @@ extension FileTreeDatabase: LazyFileNodeProvider {
             try LazyFileNode
                 .filter(Column("parentPath") == parentPath)
                 .fetchCount(db)
+        }
+    }
+}
+
+// MARK: - Aggregation
+
+extension FileTreeDatabase {
+    func aggregateDirectorySizes(scanID: UUID) throws {
+        try dbWriter.write { db in
+            let maxDepth = try Int.fetchOne(db, sql: """
+                SELECT MAX(LENGTH(path) - LENGTH(REPLACE(path, '/', '')))
+                FROM lazyFileNode WHERE scanID = ? AND isDirectory = 1
+                """, arguments: [scanID]) ?? 0
+
+            for targetDepth in stride(from: maxDepth, through: 0, by: -1) {
+                try db.execute(sql: """
+                    UPDATE lazyFileNode SET
+                        size = COALESCE((
+                            SELECT SUM(c.size) FROM lazyFileNode c
+                            WHERE c.parentPath = lazyFileNode.path AND c.scanID = ?
+                        ), 0),
+                        fileCount = COALESCE((
+                            SELECT SUM(c.fileCount) FROM lazyFileNode c
+                            WHERE c.parentPath = lazyFileNode.path AND c.scanID = ?
+                        ), 0)
+                    WHERE isDirectory = 1 AND scanID = ?
+                    AND (LENGTH(path) - LENGTH(REPLACE(path, '/', ''))) = ?
+                    """, arguments: [scanID, scanID, scanID, targetDepth])
+            }
         }
     }
 }
