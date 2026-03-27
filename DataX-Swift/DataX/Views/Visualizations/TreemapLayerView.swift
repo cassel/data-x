@@ -293,22 +293,15 @@ final class TreemapLayerHostingView: NSView {
             !snapshot.reduceMotion &&
             !currentOrderedIDs.isEmpty
 
+        // ── Phase 1: Structural changes (disabled actions, single recomposite) ──
         CATransaction.begin()
-        if shouldAnimate {
-            CATransaction.setAnimationDuration(0.24)
-            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
-        } else {
-            CATransaction.setDisableActions(true)
-        }
+        CATransaction.setDisableActions(true)
 
         var removedLayers: [TreemapBlockLayer] = []
 
         for removedID in diff.removedIDs {
             guard let layer = shapeLayersByID[removedID] else { continue }
-            let currentRect = currentRectsByID[removedID]
-
-            if shouldAnimate, let currentRect {
-                apply(rect: currentRect.collapsedDisplayRect, to: layer, color: currentRect.color, depth: currentRect.depth, opacity: 0)
+            if shouldAnimate {
                 removedLayers.append(layer)
             } else {
                 layer.removeFromSuperlayer()
@@ -322,34 +315,68 @@ final class TreemapLayerHostingView: NSView {
             if shapeLayersByID[rect.id] == nil {
                 shapeLayersByID[rect.id] = layer
                 rectContainerLayer.addSublayer(layer)
-
-                if shouldAnimate {
-                    apply(rect: rect.collapsedDisplayRect, to: layer, color: rect.color, depth: rect.depth, opacity: 0)
-                }
             }
 
             rectContainerLayer.insertSublayer(layer, at: UInt32(index))
-            apply(rect: rect.displayRect, to: layer, color: rect.color, depth: rect.depth, opacity: 1)
         }
 
-        CATransaction.setCompletionBlock { [weak self] in
-            guard let self else { return }
-
-            for layer in removedLayers {
-                layer.removeFromSuperlayer()
+        // Set initial collapsed state for new layers (animation start point)
+        if shouldAnimate {
+            let insertedSet = Set(diff.insertedIDs)
+            for rect in renderableRects where insertedSet.contains(rect.id) {
+                guard let layer = shapeLayersByID[rect.id] else { continue }
+                apply(rect: rect.collapsedDisplayRect, to: layer, color: rect.color, depth: rect.depth, opacity: 0)
             }
+        }
+
+        // Inline label rebuilding (eliminates separate recomposite)
+        rebuildLabelLayers(using: snapshot.rects)
+
+        if !shouldAnimate {
+            // Non-animated: apply final properties immediately
+            for rect in renderableRects {
+                guard let layer = shapeLayersByID[rect.id] else { continue }
+                apply(rect: rect.displayRect, to: layer, color: rect.color, depth: rect.depth, opacity: 1)
+            }
+        }
+
+        CATransaction.commit()
+
+        // ── Phase 2: Animated property changes ──
+        if shouldAnimate {
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(0.24)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
 
             for removedID in diff.removedIDs {
-                self.shapeLayersByID[removedID] = nil
+                guard let layer = shapeLayersByID[removedID],
+                      let currentRect = currentRectsByID[removedID] else { continue }
+                apply(rect: currentRect.collapsedDisplayRect, to: layer, color: currentRect.color, depth: currentRect.depth, opacity: 0)
             }
+
+            for rect in renderableRects {
+                guard let layer = shapeLayersByID[rect.id] else { continue }
+                apply(rect: rect.displayRect, to: layer, color: rect.color, depth: rect.depth, opacity: 1)
+            }
+
+            CATransaction.setCompletionBlock { [weak self] in
+                guard let self else { return }
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                for layer in removedLayers {
+                    layer.removeFromSuperlayer()
+                }
+                CATransaction.commit()
+                for removedID in diff.removedIDs {
+                    self.shapeLayersByID[removedID] = nil
+                }
+            }
+            CATransaction.commit()
         }
-        CATransaction.commit()
 
         currentRectsByID = nextRectsByID
         currentTopLevelRects = nextTopLevelRects
         currentOrderedIDs = renderableRects.map(\.id)
-
-        rebuildLabelLayers(using: snapshot.rects)
     }
 
     private func makeShapeLayer(for rect: TreemapRect) -> TreemapBlockLayer {
@@ -380,8 +407,6 @@ final class TreemapLayerHostingView: NSView {
     }
 
     private func rebuildLabelLayers(using rects: [TreemapRect]) {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
         labelContainerLayer.sublayers?.forEach { $0.removeFromSuperlayer() }
 
         for rect in rects where rect.shouldShowTopLevelLabel {
@@ -392,8 +417,6 @@ final class TreemapLayerHostingView: NSView {
                 labelContainerLayer.addSublayer(sizeLayer)
             }
         }
-
-        CATransaction.commit()
     }
 
     private func makeLabelLayers(for rect: TreemapRect) -> TreemapTextLayers? {
