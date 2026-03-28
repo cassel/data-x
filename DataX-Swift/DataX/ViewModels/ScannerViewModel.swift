@@ -324,6 +324,7 @@ final class ScannerViewModel {
     @ObservationIgnored private var stableNodeIDsByPath: [String: UUID] = [:]
     @ObservationIgnored private var modelContext: ModelContext?
     @ObservationIgnored private var growthAlertDismissTask: Task<Void, Never>?
+    @ObservationIgnored private var incrementalRenderTask: Task<Void, Never>?
     @ObservationIgnored private var lastLayoutRevisionTime = Date.distantPast
     @ObservationIgnored private var lastProgressUIUpdateTime = Date.distantPast
     @ObservationIgnored private var latestScanProgress: ScanProgress?
@@ -401,36 +402,52 @@ final class ScannerViewModel {
         diskInfo = try? DiskInfo.forPath(standardizedDirectory)
         prepareIncrementalRoot(for: standardizedDirectory)
 
-        var databaseWriter: ScanDatabaseWriter?
         let scanID = UUID()
         if fileTreeDatabase == nil {
             fileTreeDatabase = try? FileTreeDatabase(path: FileTreeDatabase.defaultPath())
         }
-        if let db = fileTreeDatabase {
-            let writer = ScanDatabaseWriter(database: db)
-            do {
-                try writer.beginScan(scanID: scanID, rootPath: standardizedDirectory.path)
-                databaseWriter = writer
-                lastScanID = scanID
-            } catch {
-                Self.persistenceLogger.error("Failed to begin scan database write: \(error.localizedDescription)")
+        guard let db = fileTreeDatabase else {
+            Self.persistenceLogger.error("Failed to initialize database for scan")
+            isScanning = false
+            isIncrementalScanInProgress = false
+            return
+        }
+
+        let writer = ScanDatabaseWriter(database: db)
+        do {
+            try writer.beginScan(scanID: scanID, rootPath: standardizedDirectory.path)
+            lastScanID = scanID
+        } catch {
+            Self.persistenceLogger.error("Failed to begin scan database write: \(error.localizedDescription)")
+            isScanning = false
+            isIncrementalScanInProgress = false
+            return
+        }
+
+        // Launch incremental database preview polling
+        incrementalRenderTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            while !Task.isCancelled {
+                guard let self, self.isIncrementalScanInProgress else { break }
+                self.refreshTreePreviewFromDatabase()
+                try? await Task.sleep(for: .seconds(2))
             }
         }
 
-        scanTask = Task { [weak self, scanner, standardizedDirectory, databaseWriter] in
+        scanTask = Task { [weak self, scanner, standardizedDirectory, writer] in
             guard let self else {
                 await scanner.cancel()
                 return
             }
 
-            let events = await scanner.scan(directory: standardizedDirectory, databaseWriter: databaseWriter)
+            let events = await scanner.scanToDatabase(directory: standardizedDirectory, scanID: scanID, databaseWriter: writer)
             var didComplete = false
 
             for await event in events {
                 guard !Task.isCancelled else { break }
                 guard self.activeScanSessionID == sessionID else { break }
 
-                if case .complete = event {
+                if case .databaseComplete = event {
                     didComplete = true
                 }
 
@@ -751,6 +768,8 @@ final class ScannerViewModel {
 
         activeScanSessionID = nil
         self.scanTask = nil
+        incrementalRenderTask?.cancel()
+        incrementalRenderTask = nil
 
         scanTask?.cancel()
 
@@ -778,10 +797,12 @@ final class ScannerViewModel {
                 lastProgressUIUpdateTime = now
                 self.progress = progress
             }
-        case .partialTree(let subtree):
-            mergePartialTree(subtree)
-        case .complete(let finalTree):
-            completeLocalScan(with: finalTree, sessionID: sessionID)
+        case .partialTree:
+            break // Not emitted by scanToDatabase; kept for backward compatibility
+        case .complete:
+            break // Not emitted by scanToDatabase; kept for backward compatibility
+        case .databaseComplete:
+            completeLocalDatabaseScan(sessionID: sessionID)
         }
     }
 
@@ -842,7 +863,12 @@ final class ScannerViewModel {
 
         root.sortChildrenBySize()
 
-        if let db = fileTreeDatabase, let scanID = lastScanID {
+        if virtualTreeProvider != nil {
+            // Database-first path: VirtualTreeProvider already set by completeLocalDatabaseScan
+            rootNode = root
+            currentNode = root
+            navigationStack = [root]
+        } else if let db = fileTreeDatabase, let scanID = lastScanID {
             let provider = VirtualTreeProvider(database: db, scanID: scanID, nodeBudget: MemoryBudgetManager.effectiveBudget())
             virtualTreeProvider = provider
             do {
@@ -933,9 +959,83 @@ final class ScannerViewModel {
         finishLocalScan(sessionID: sessionID)
     }
 
+    private func completeLocalDatabaseScan(sessionID: UUID) {
+        guard activeScanSessionID == sessionID else { return }
+        guard let db = fileTreeDatabase, let scanID = lastScanID else { return }
+
+        incrementalRenderTask?.cancel()
+        incrementalRenderTask = nil
+
+        let provider = VirtualTreeProvider(
+            database: db,
+            scanID: scanID,
+            nodeBudget: MemoryBudgetManager.effectiveBudget()
+        )
+        virtualTreeProvider = provider
+
+        do {
+            guard let dbRoot = try provider.rootNode(maxDepth: 6) else {
+                Self.persistenceLogger.error("Database-first scan failed: no root node found")
+                isScanning = false
+                isIncrementalScanInProgress = false
+                finishLocalScan(sessionID: sessionID)
+                return
+            }
+            handleCompletedScan(dbRoot)
+        } catch {
+            Self.persistenceLogger.error("Database-first scan failed to load root: \(error.localizedDescription)")
+            isScanning = false
+            isIncrementalScanInProgress = false
+        }
+
+        if let latestScanProgress {
+            self.progress = latestScanProgress
+        }
+        latestScanProgress = nil
+        finishLocalScan(sessionID: sessionID)
+    }
+
+    private func refreshTreePreviewFromDatabase() {
+        guard let db = fileTreeDatabase,
+              let scanID = lastScanID,
+              let rootNode else { return }
+        let rootPath = rootNode.path.standardizedFileURL.path
+        do {
+            try db.quickAggregateSizes(scanID: scanID, parentPath: rootPath)
+            let topChildren = try db.fetchChildren(of: rootPath, limit: 100)
+            let childNodes = topChildren.map { lazy -> FileNode in
+                FileNode(
+                    id: stableID(for: lazy.path),
+                    name: lazy.name,
+                    path: URL(fileURLWithPath: lazy.path),
+                    isDirectory: lazy.isDirectory,
+                    isHidden: lazy.isHidden,
+                    isSymlink: lazy.isSymlink,
+                    fileExtension: lazy.fileExtension,
+                    modificationDate: lazy.modificationDate,
+                    size: lazy.size,
+                    fileCount: lazy.fileCount,
+                    children: lazy.isDirectory ? [] : nil
+                )
+            }
+            rootNode.children = childNodes
+            rootNode.size = childNodes.reduce(0) { $0 + $1.size }
+            rootNode.fileCount = childNodes.reduce(0) { $0 + $1.fileCount }
+            let now = Date()
+            if now.timeIntervalSince(lastLayoutRevisionTime) >= 0.5 {
+                lastLayoutRevisionTime = now
+                treeMutationRevision += 1
+            }
+        } catch {
+            Self.persistenceLogger.debug("Incremental preview query failed: \(error.localizedDescription)")
+        }
+    }
+
     private func finishCancelledLocalScan(sessionID: UUID) {
         guard activeScanSessionID == sessionID else { return }
 
+        incrementalRenderTask?.cancel()
+        incrementalRenderTask = nil
         advanceTreeSession()
         isScanning = false
         isIncrementalScanInProgress = false

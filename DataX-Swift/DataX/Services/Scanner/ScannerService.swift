@@ -55,6 +55,37 @@ actor ScannerService {
         return stream
     }
 
+    func scanToDatabase(
+        directory: URL,
+        scanID: UUID,
+        maxDepth: Int? = nil,
+        includeHidden: Bool = false,
+        databaseWriter: ScanDatabaseWriter
+    ) -> AsyncStream<ScanEvent> {
+        cancelActiveScanIfNeeded()
+        resetState()
+        let standardizedDirectory = directory.standardizedFileURL
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: ScanEvent.self,
+            bufferingPolicy: .bufferingNewest(Self.streamBufferSize)
+        )
+
+        activeScanID = scanID
+        activeContinuation = continuation
+        activeScanTask = Task(priority: .utility) { [standardizedDirectory, maxDepth, includeHidden, databaseWriter] in
+            await self.runScanToDatabase(
+                id: scanID,
+                directory: standardizedDirectory,
+                maxDepth: maxDepth,
+                includeHidden: includeHidden,
+                databaseWriter: databaseWriter,
+                continuation: continuation
+            )
+        }
+
+        return stream
+    }
+
     func cancel() {
         isCancelled = true
         activeScanID = nil
@@ -125,6 +156,162 @@ actor ScannerService {
             return
         } catch {
             return
+        }
+    }
+
+    private func runScanToDatabase(
+        id: UUID,
+        directory: URL,
+        maxDepth: Int?,
+        includeHidden: Bool,
+        databaseWriter: ScanDatabaseWriter,
+        continuation: AsyncStream<ScanEvent>.Continuation
+    ) async {
+        defer {
+            continuation.finish()
+
+            if activeScanID == id {
+                activeScanID = nil
+                activeScanTask = nil
+                activeContinuation = nil
+            }
+        }
+
+        emit(
+            .progress(
+                makeProgress(
+                    currentPath: Self.displayName(for: directory),
+                    isComplete: false
+                )
+            ),
+            continuation: continuation
+        )
+
+        do {
+            try await scanDirectoryToDatabase(
+                at: directory,
+                depth: 0,
+                maxDepth: maxDepth,
+                includeHidden: includeHidden,
+                modificationDate: nil,
+                databaseWriter: databaseWriter,
+                continuation: continuation
+            )
+
+            try throwIfCancelled()
+            try databaseWriter.finalize(scanID: id)
+            emit(
+                .progress(makeProgress(currentPath: directory.path, isComplete: true)),
+                continuation: continuation
+            )
+            emit(.databaseComplete, continuation: continuation)
+        } catch is CancellationError {
+            return
+        } catch {
+            return
+        }
+    }
+
+    private func scanDirectoryToDatabase(
+        at directory: URL,
+        depth: Int,
+        maxDepth: Int?,
+        includeHidden: Bool,
+        modificationDate: Date?,
+        databaseWriter: ScanDatabaseWriter,
+        continuation: AsyncStream<ScanEvent>.Continuation
+    ) async throws {
+        try throwIfCancelled()
+        let standardizedDirectory = directory.standardizedFileURL
+
+        if let maxDepth, depth >= maxDepth {
+            return
+        }
+
+        directoriesScanned += 1
+        if let activeScanID {
+            var node = LazyFileNode.fromScanEntry(
+                url: standardizedDirectory,
+                isDirectory: true,
+                isSymlink: false,
+                fileSize: 0,
+                modificationDate: modificationDate,
+                scanID: activeScanID
+            )
+            if depth == 0 {
+                node.parentPath = nil
+            }
+            databaseWriter.add(node)
+        }
+        emitProgress(
+            currentPath: Self.displayName(for: standardizedDirectory),
+            progress: continuation
+        )
+        try await maybeYieldTraversalControl()
+
+        var options: FileManager.DirectoryEnumerationOptions = [.skipsPackageDescendants]
+        if !includeHidden {
+            options.insert(.skipsHiddenFiles)
+        }
+
+        let contents: [URL]
+        do {
+            contents = try FileManager.default.contentsOfDirectory(
+                at: standardizedDirectory,
+                includingPropertiesForKeys: Array(Self.resourceKeys),
+                options: options
+            )
+        } catch {
+            return
+        }
+
+        for url in contents {
+            try throwIfCancelled()
+            try await maybeYieldTraversalControl()
+
+            do {
+                let standardizedURL = url.standardizedFileURL
+                let resourceValues = try standardizedURL.resourceValues(forKeys: Self.resourceKeys)
+
+                let isDirectory = resourceValues.isDirectory ?? false
+                let isSymlink = resourceValues.isSymbolicLink ?? false
+                let fileSize = UInt64(resourceValues.fileSize ?? 0)
+                let modDate = resourceValues.contentModificationDate
+
+                if isDirectory && !isSymlink {
+                    try await scanDirectoryToDatabase(
+                        at: standardizedURL,
+                        depth: depth + 1,
+                        maxDepth: maxDepth,
+                        includeHidden: includeHidden,
+                        modificationDate: modDate,
+                        databaseWriter: databaseWriter,
+                        continuation: continuation
+                    )
+                } else {
+                    filesScanned += 1
+                    bytesScanned += fileSize
+                    try await maybeAdaptiveThrottle()
+                    if let activeScanID {
+                        databaseWriter.add(LazyFileNode.fromScanEntry(
+                            url: standardizedURL,
+                            isDirectory: isDirectory,
+                            isSymlink: isSymlink,
+                            fileSize: fileSize,
+                            modificationDate: modDate,
+                            scanID: activeScanID
+                        ))
+                    }
+                    emitProgress(
+                        currentPath: Self.displayName(for: standardizedURL),
+                        progress: continuation
+                    )
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                continue
+            }
         }
     }
 
@@ -213,14 +400,18 @@ actor ScannerService {
 
         directoriesScanned += 1
         if let databaseWriter, let activeScanID {
-            databaseWriter.add(LazyFileNode.fromScanEntry(
+            var node = LazyFileNode.fromScanEntry(
                 url: standardizedDirectory,
                 isDirectory: true,
                 isSymlink: false,
                 fileSize: 0,
                 modificationDate: modificationDate,
                 scanID: activeScanID
-            ))
+            )
+            if depth == 0 {
+                node.parentPath = nil
+            }
+            databaseWriter.add(node)
         }
         emitProgress(
             currentPath: Self.displayName(for: standardizedDirectory),

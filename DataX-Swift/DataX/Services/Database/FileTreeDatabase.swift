@@ -162,6 +162,30 @@ extension FileTreeDatabase {
     }
 }
 
+// MARK: - Quick Aggregation (Incremental Preview)
+
+extension FileTreeDatabase {
+    /// Single-level directory size aggregation for incremental preview during scan.
+    /// Only aggregates directories whose parentPath matches the given path — fast because
+    /// it updates a handful of rows (top-level dirs, typically <100) using the indexed parentPath column.
+    func quickAggregateSizes(scanID: UUID, parentPath: String) throws {
+        try dbWriter.write { db in
+            try db.execute(sql: """
+                UPDATE lazyFileNode SET
+                    size = COALESCE((
+                        SELECT SUM(c.size) FROM lazyFileNode c
+                        WHERE c.parentPath = lazyFileNode.path AND c.scanID = ?1
+                    ), 0),
+                    fileCount = COALESCE((
+                        SELECT SUM(c.fileCount) FROM lazyFileNode c
+                        WHERE c.parentPath = lazyFileNode.path AND c.scanID = ?1
+                    ), 0)
+                WHERE isDirectory = 1 AND scanID = ?1 AND parentPath = ?2
+                """, arguments: [scanID, parentPath])
+        }
+    }
+}
+
 // MARK: - Default Database Location
 
 extension FileTreeDatabase {

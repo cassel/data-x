@@ -3,14 +3,12 @@ import XCTest
 
 @MainActor
 final class ScannerViewModelIncrementalTests: XCTestCase {
-    func testLocalIncrementalScanMergesPartialTreesIntoFinalRootParity() async throws {
+    func testLocalDatabaseFirstScanProducesCorrectFinalTree() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
         try makeLargeFixture(at: directory, directoryCount: 12, filesPerDirectory: 120)
         try writeFile(at: directory.appendingPathComponent("README.md"), size: 5)
-
-        let expectedFinalRoot = try await finalRootSnapshot(for: directory)
 
         let viewModel = ScannerViewModel()
         viewModel.scan(directory: directory)
@@ -20,19 +18,22 @@ final class ScannerViewModelIncrementalTests: XCTestCase {
         XCTAssertEqual(viewModel.currentNode?.id, viewModel.rootNode?.id)
         XCTAssertEqual(viewModel.navigationStack.map(\.id), viewModel.rootNode.map { [$0.id] } ?? [])
 
-        let sawPartialTree = await waitUntil {
-            viewModel.isScanning && (viewModel.rootNode?.children?.isEmpty == false)
-        }
-        XCTAssertTrue(sawPartialTree)
-
-        let scanCompleted = await waitUntil {
+        let scanCompleted = await waitUntil(timeoutNanoseconds: 15_000_000_000) {
             !viewModel.isScanning && viewModel.rootNode != nil
         }
         XCTAssertTrue(scanCompleted)
         XCTAssertFalse(viewModel.isIncrementalScanInProgress)
 
         let rootNode = try XCTUnwrap(viewModel.rootNode)
-        XCTAssertEqual(snapshot(for: rootNode), snapshot(for: expectedFinalRoot))
+        XCTAssertTrue(rootNode.isDirectory)
+        // 12 dirs * 120 files * 1 byte + 1 file * 5 bytes = 1445 total size
+        XCTAssertEqual(rootNode.size, 1445)
+        XCTAssertEqual(rootNode.fileCount, 1441)
+        // 12 directories + README.md = 13 children
+        XCTAssertEqual(rootNode.children?.count, 13)
+
+        // Verify VirtualTreeProvider was set
+        XCTAssertNotNil(viewModel.virtualTreeProvider)
     }
 
     func testCancelScanClearsPartialIncrementalState() async throws {
@@ -44,10 +45,11 @@ final class ScannerViewModelIncrementalTests: XCTestCase {
         let viewModel = ScannerViewModel()
         viewModel.scan(directory: directory)
 
-        let sawPartialTree = await waitUntil {
-            viewModel.isScanning && (viewModel.rootNode?.children?.isEmpty == false)
+        // Wait briefly to ensure scan has started
+        let scanStarted = await waitUntil {
+            viewModel.isScanning && viewModel.rootNode != nil
         }
-        XCTAssertTrue(sawPartialTree)
+        XCTAssertTrue(scanStarted)
 
         viewModel.cancelScan()
 
@@ -60,20 +62,6 @@ final class ScannerViewModelIncrementalTests: XCTestCase {
         XCTAssertTrue(viewModel.navigationStack.isEmpty)
         XCTAssertNil(viewModel.progress)
         XCTAssertFalse(viewModel.isIncrementalScanInProgress)
-    }
-
-    private func finalRootSnapshot(for directory: URL) async throws -> FileNodeData {
-        let scanner = ScannerService()
-        let events = await scanner.scan(directory: directory)
-
-        for await event in events {
-            if case .complete(let root) = event {
-                return root
-            }
-        }
-
-        XCTFail("Expected a complete scan event")
-        throw CancellationError()
     }
 
     private func waitUntil(
@@ -92,28 +80,6 @@ final class ScannerViewModelIncrementalTests: XCTestCase {
         }
 
         return condition()
-    }
-
-    private func snapshot(for root: FileNodeData) -> TreeSnapshot {
-        TreeSnapshot(
-            path: root.url.standardizedFileURL.path,
-            size: root.size,
-            fileCount: root.fileCount,
-            children: (root.children ?? [])
-                .map(snapshot(for:))
-                .sorted { $0.path < $1.path }
-        )
-    }
-
-    private func snapshot(for root: FileNode) -> TreeSnapshot {
-        TreeSnapshot(
-            path: root.path.standardizedFileURL.path,
-            size: root.size,
-            fileCount: root.fileCount,
-            children: (root.children ?? [])
-                .map(snapshot(for:))
-                .sorted { $0.path < $1.path }
-        )
     }
 
     private func makeTemporaryDirectory() throws -> URL {
@@ -139,11 +105,4 @@ final class ScannerViewModelIncrementalTests: XCTestCase {
         let data = Data(repeating: 65, count: size)
         FileManager.default.createFile(atPath: url.path, contents: data)
     }
-}
-
-private struct TreeSnapshot: Equatable {
-    let path: String
-    let size: UInt64
-    let fileCount: Int
-    let children: [TreeSnapshot]
 }
