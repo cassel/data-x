@@ -279,15 +279,39 @@ actor ScannerService {
                 let modDate = resourceValues.contentModificationDate
 
                 if isDirectory && !isSymlink && !shouldSkipDirectory(standardizedURL, depth: depth + 1) {
-                    try await scanDirectoryToDatabase(
-                        at: standardizedURL,
-                        depth: depth + 1,
-                        maxDepth: maxDepth,
-                        includeHidden: includeHidden,
-                        modificationDate: modDate,
-                        databaseWriter: databaseWriter,
-                        continuation: continuation
-                    )
+                    if isOpaqueDirectory(standardizedURL) {
+                        // Fast size-only scan for opaque dirs
+                        let (dirSize, dirFileCount) = fastDirectorySize(at: standardizedURL)
+                        filesScanned += dirFileCount
+                        bytesScanned += dirSize
+                        directoriesScanned += 1
+                        if let activeScanID {
+                            var node = LazyFileNode.fromScanEntry(
+                                url: standardizedURL,
+                                isDirectory: true,
+                                isSymlink: false,
+                                fileSize: dirSize,
+                                modificationDate: modDate,
+                                scanID: activeScanID
+                            )
+                            node.fileCount = dirFileCount
+                            databaseWriter.add(node)
+                        }
+                        emitProgress(
+                            currentPath: Self.displayName(for: standardizedURL),
+                            progress: continuation
+                        )
+                    } else {
+                        try await scanDirectoryToDatabase(
+                            at: standardizedURL,
+                            depth: depth + 1,
+                            maxDepth: maxDepth,
+                            includeHidden: includeHidden,
+                            modificationDate: modDate,
+                            databaseWriter: databaseWriter,
+                            continuation: continuation
+                        )
+                    }
                 } else {
                     filesScanned += 1
                     bytesScanned += fileSize
@@ -462,16 +486,37 @@ actor ScannerService {
                 let child: FileNodeData
 
                 if isDirectory && !isSymlink && !shouldSkipDirectory(standardizedURL, depth: depth + 1) {
-                    child = try await scanDirectory(
-                        at: standardizedURL,
-                        depth: depth + 1,
-                        maxDepth: maxDepth,
-                        includeHidden: includeHidden,
-                        modificationDate: modDate,
-                        directorySize: fileSize,
-                        databaseWriter: databaseWriter,
-                        continuation: continuation
-                    )
+                    if isOpaqueDirectory(standardizedURL) {
+                        // Fast size-only scan — don't recurse into deep dirs
+                        let (dirSize, dirFileCount) = fastDirectorySize(at: standardizedURL)
+                        filesScanned += dirFileCount
+                        bytesScanned += dirSize
+                        directoriesScanned += 1
+                        child = FileNodeData(
+                            url: standardizedURL,
+                            isDirectory: true,
+                            isSymlink: false,
+                            size: dirSize,
+                            modificationDate: modDate,
+                            fileCount: dirFileCount,
+                            children: []
+                        )
+                        emitProgress(
+                            currentPath: Self.displayName(for: standardizedURL),
+                            progress: continuation
+                        )
+                    } else {
+                        child = try await scanDirectory(
+                            at: standardizedURL,
+                            depth: depth + 1,
+                            maxDepth: maxDepth,
+                            includeHidden: includeHidden,
+                            modificationDate: modDate,
+                            directorySize: fileSize,
+                            databaseWriter: databaseWriter,
+                            continuation: continuation
+                        )
+                    }
                 } else {
                     filesScanned += 1
                     bytesScanned += fileSize
@@ -552,8 +597,8 @@ actor ScannerService {
         return name.isEmpty ? url.path : name
     }
 
-    /// Directories that should ALWAYS be skipped — virtual filesystems,
-    /// system internals, and paths that cause loops or permission storms.
+    /// Directories that should ALWAYS be skipped — virtual filesystems
+    /// and system internals that cause loops or are useless to analyze.
     private static let alwaysSkipNames: Set<String> = [
         ".Spotlight-V100",
         ".fseventsd",
@@ -563,6 +608,22 @@ actor ScannerService {
         ".Trashes",
         ".vol",
         ".file",
+    ]
+
+    /// Directories to treat as opaque — their total size is counted but
+    /// children are NOT recursed into. These contain thousands of small
+    /// files with deep nesting that stall the scanner.
+    private static let opaqueDirectoryNames: Set<String> = [
+        "node_modules",
+        ".pnpm",
+        "Pods",
+        ".build",
+        ".git",
+        "DerivedData",
+        ".cache",
+        "__pycache__",
+        ".tox",
+        "vendor",       // Go/PHP/Ruby
     ]
 
     /// Full paths to skip — firmlinks, virtual mounts, and volumes that
@@ -608,5 +669,37 @@ actor ScannerService {
         visitedRealPaths.insert(realPath)
 
         return false
+    }
+
+    /// Returns true if this directory should be scanned for total size
+    /// only, without recursing into individual children.
+    private func isOpaqueDirectory(_ url: URL) -> Bool {
+        Self.opaqueDirectoryNames.contains(url.lastPathComponent)
+    }
+
+    /// Fast size-only scan using FileManager.enumerator — counts total
+    /// bytes and file count without building a tree.
+    private func fastDirectorySize(at url: URL) -> (size: UInt64, fileCount: Int) {
+        var totalSize: UInt64 = 0
+        var fileCount = 0
+
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return (0, 0)
+        }
+
+        for case let fileURL as URL in enumerator {
+            guard !isCancelled else { break }
+            if let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]),
+               !(values.isDirectory ?? false) {
+                totalSize += UInt64(values.fileSize ?? 0)
+                fileCount += 1
+            }
+        }
+
+        return (totalSize, fileCount)
     }
 }
