@@ -14,10 +14,17 @@ settings:
     SWIFT_VERSION: "5.9"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
 
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    from: "7.0.0"
+
 targets:
   DataX:
     type: application
     platform: macOS
+    dependencies:
+      - package: GRDB
     sources:
       - path: DataX
         excludes:
