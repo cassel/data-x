@@ -322,6 +322,7 @@ actor ScannerService {
         bytesScanned = 0
         startTime = Date()
         lastProgressUpdate = Date()
+        visitedRealPaths = []
     }
 
     private func throwIfCancelled() throws {
@@ -551,30 +552,61 @@ actor ScannerService {
         return name.isEmpty ? url.path : name
     }
 
-    /// Directories to skip when scanning root `/` — they are either
-    /// virtual filesystems, contain millions of small system files, or
-    /// cause permission errors that stall the scan.
-    private static let rootSkipList: Set<String> = [
-        "/System/Volumes/Data/.Spotlight-V100",
-        "/System/Volumes/Data/.fseventsd",
+    /// Directories that should ALWAYS be skipped — virtual filesystems,
+    /// system internals, and paths that cause loops or permission storms.
+    private static let alwaysSkipNames: Set<String> = [
+        ".Spotlight-V100",
+        ".fseventsd",
+        ".MobileBackups",
+        ".MobileBackups.trash",
+        ".DocumentRevisions-V100",
+        ".Trashes",
+        ".vol",
+        ".file",
+    ]
+
+    /// Full paths to skip — firmlinks, virtual mounts, and volumes that
+    /// would cause the scanner to loop or double-count.
+    private static let skipPaths: Set<String> = [
+        "/dev",
+        "/proc",
+        "/Volumes",
+        "/System/Volumes/Data",      // firmlink to data volume (prevents double-scan)
+        "/System/Volumes/Preboot",
+        "/System/Volumes/Recovery",
+        "/System/Volumes/VM",
+        "/System/Volumes/Update",
         "/private/var/db",
         "/private/var/folders",
         "/private/var/run",
-        "/dev",
-        "/proc",
-        "/Volumes"  // avoid scanning other mounted volumes recursively
+        "/private/var/vm",
+        "/cores",
     ]
+
+    /// Tracks visited real paths to prevent symlink/firmlink loops.
+    private var visitedRealPaths: Set<String> = []
 
     private func shouldSkipDirectory(_ url: URL, depth: Int) -> Bool {
         let path = url.path
-        // When scanning root, skip known problematic dirs
-        if depth <= 2 {
-            for skip in Self.rootSkipList {
-                if path == skip || path.hasPrefix(skip + "/") {
-                    return true
-                }
-            }
+
+        // Always skip known problematic directory names
+        let name = url.lastPathComponent
+        if Self.alwaysSkipNames.contains(name) {
+            return true
         }
+
+        // Skip known full paths
+        if Self.skipPaths.contains(path) {
+            return true
+        }
+
+        // Resolve real path to detect firmlink/symlink loops
+        let realPath = (path as NSString).resolvingSymlinksInPath
+        if visitedRealPaths.contains(realPath) {
+            return true
+        }
+        visitedRealPaths.insert(realPath)
+
         return false
     }
 }
