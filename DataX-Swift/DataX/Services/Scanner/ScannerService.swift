@@ -278,7 +278,7 @@ actor ScannerService {
                 let fileSize = UInt64(resourceValues.fileSize ?? 0)
                 let modDate = resourceValues.contentModificationDate
 
-                if isDirectory && !isSymlink {
+                if isDirectory && !isSymlink && !shouldSkipDirectory(standardizedURL, depth: depth + 1) {
                     try await scanDirectoryToDatabase(
                         at: standardizedURL,
                         depth: depth + 1,
@@ -460,7 +460,7 @@ actor ScannerService {
 
                 let child: FileNodeData
 
-                if isDirectory && !isSymlink {
+                if isDirectory && !isSymlink && !shouldSkipDirectory(standardizedURL, depth: depth + 1) {
                     child = try await scanDirectory(
                         at: standardizedURL,
                         depth: depth + 1,
@@ -502,7 +502,7 @@ actor ScannerService {
 
                 children.append(child)
 
-                if depth == 0 {
+                if depth <= 1 {
                     emit(.partialTree(child), continuation: continuation)
                 }
             } catch is CancellationError {
@@ -549,5 +549,32 @@ actor ScannerService {
     private static func displayName(for url: URL) -> String {
         let name = url.lastPathComponent
         return name.isEmpty ? url.path : name
+    }
+
+    /// Directories to skip when scanning root `/` — they are either
+    /// virtual filesystems, contain millions of small system files, or
+    /// cause permission errors that stall the scan.
+    private static let rootSkipList: Set<String> = [
+        "/System/Volumes/Data/.Spotlight-V100",
+        "/System/Volumes/Data/.fseventsd",
+        "/private/var/db",
+        "/private/var/folders",
+        "/private/var/run",
+        "/dev",
+        "/proc",
+        "/Volumes"  // avoid scanning other mounted volumes recursively
+    ]
+
+    private func shouldSkipDirectory(_ url: URL, depth: Int) -> Bool {
+        let path = url.path
+        // When scanning root, skip known problematic dirs
+        if depth <= 2 {
+            for skip in Self.rootSkipList {
+                if path == skip || path.hasPrefix(skip + "/") {
+                    return true
+                }
+            }
+        }
+        return false
     }
 }
