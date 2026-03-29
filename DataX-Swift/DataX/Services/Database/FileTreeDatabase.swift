@@ -138,26 +138,53 @@ extension FileTreeDatabase: LazyFileNodeProvider {
 extension FileTreeDatabase {
     func aggregateDirectorySizes(scanID: UUID) throws {
         try dbWriter.write { db in
+            // Step 1: Compute direct-children sums into a temp table (one pass)
+            try db.execute(sql: """
+                CREATE TEMP TABLE IF NOT EXISTS dirSums AS
+                SELECT parentPath, SUM(size) AS totalSize, SUM(fileCount) AS totalFileCount
+                FROM lazyFileNode
+                WHERE scanID = ?
+                GROUP BY parentPath
+                """, arguments: [scanID])
+
+            // Step 2: Create index on temp table for fast lookup
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_dirSums_parent ON dirSums(parentPath)
+                """)
+
+            // Step 3: Update directories bottom-up by depth
             let maxDepth = try Int.fetchOne(db, sql: """
                 SELECT MAX(LENGTH(path) - LENGTH(REPLACE(path, '/', '')))
                 FROM lazyFileNode WHERE scanID = ? AND isDirectory = 1
                 """, arguments: [scanID]) ?? 0
 
             for targetDepth in stride(from: maxDepth, through: 0, by: -1) {
+                // Update dirs at this depth from temp table
                 try db.execute(sql: """
                     UPDATE lazyFileNode SET
-                        size = COALESCE((
-                            SELECT SUM(c.size) FROM lazyFileNode c
-                            WHERE c.parentPath = lazyFileNode.path AND c.scanID = ?
-                        ), 0),
-                        fileCount = COALESCE((
-                            SELECT SUM(c.fileCount) FROM lazyFileNode c
-                            WHERE c.parentPath = lazyFileNode.path AND c.scanID = ?
-                        ), 0)
+                        size = COALESCE((SELECT totalSize FROM dirSums WHERE dirSums.parentPath = lazyFileNode.path), 0),
+                        fileCount = COALESCE((SELECT totalFileCount FROM dirSums WHERE dirSums.parentPath = lazyFileNode.path), 0)
                     WHERE isDirectory = 1 AND scanID = ?
                     AND (LENGTH(path) - LENGTH(REPLACE(path, '/', ''))) = ?
-                    """, arguments: [scanID, scanID, scanID, targetDepth])
+                    """, arguments: [scanID, targetDepth])
+
+                // Rebuild temp sums for the next (shallower) level
+                if targetDepth > 0 {
+                    try db.execute(sql: "DROP TABLE IF EXISTS dirSums")
+                    try db.execute(sql: """
+                        CREATE TEMP TABLE dirSums AS
+                        SELECT parentPath, SUM(size) AS totalSize, SUM(fileCount) AS totalFileCount
+                        FROM lazyFileNode
+                        WHERE scanID = ?
+                        GROUP BY parentPath
+                        """, arguments: [scanID])
+                    try db.execute(sql: """
+                        CREATE INDEX IF NOT EXISTS idx_dirSums_parent ON dirSums(parentPath)
+                        """)
+                }
             }
+
+            try db.execute(sql: "DROP TABLE IF EXISTS dirSums")
         }
     }
 }
