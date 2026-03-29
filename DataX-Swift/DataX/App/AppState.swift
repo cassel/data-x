@@ -176,8 +176,49 @@ final class AppState {
 
         if standardizedDirectory.startAccessingSecurityScopedResource() {
             activeSecurityScopedDirectory = standardizedDirectory
+            saveBookmark(for: standardizedDirectory)
         } else {
             activeSecurityScopedDirectory = nil
         }
+    }
+
+    // MARK: - Security-Scoped Bookmarks (persist folder access across launches)
+
+    private static let bookmarksKey = "savedSecurityScopedBookmarks"
+
+    private func saveBookmark(for url: URL) {
+        guard let bookmarkData = try? url.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) else { return }
+
+        var bookmarks = loadBookmarkDictionary()
+        bookmarks[url.path] = bookmarkData
+        UserDefaults.standard.set(bookmarks, forKey: Self.bookmarksKey)
+    }
+
+    /// Restores previously-granted folder access on app launch.
+    func restoreBookmarks() {
+        let bookmarks = loadBookmarkDictionary()
+        for (_, data) in bookmarks {
+            var isStale = false
+            guard let url = try? URL(
+                resolvingBookmarkData: data,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) else { continue }
+
+            if isStale {
+                // Re-save the bookmark with fresh data
+                saveBookmark(for: url)
+            }
+            _ = url.startAccessingSecurityScopedResource()
+        }
+    }
+
+    private func loadBookmarkDictionary() -> [String: Data] {
+        UserDefaults.standard.dictionary(forKey: Self.bookmarksKey) as? [String: Data] ?? [:]
     }
 }

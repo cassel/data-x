@@ -10,6 +10,7 @@ struct DataXApp: App {
         let appState = AppState()
         self.appState = appState
         appDelegate.configure(appState: appState)
+        appState.restoreBookmarks()
     }
 
     var body: some Scene {
